@@ -207,7 +207,9 @@ def _format_research_planning(content: dict) -> list[str]:
         lines.append("### Suggested Research Directions")
         for d in directions:
             if isinstance(d, dict):
-                lines.append(f"- **{d.get('area', '')}**: {d.get('rationale', d.get('description', ''))}")
+                area = d.get('area', '')
+                rationale = d.get('rationale', d.get('description', ''))
+                lines.append(f"- **{area}**: {rationale}")
             else:
                 lines.append(f"- {d}")
         lines.append("")

@@ -88,7 +88,9 @@ class VenueMappingLens(Lens):
             pass
 
         # Group facts
-        by_venue: dict[str, dict] = defaultdict(lambda: {"facts": [], "tier": "unknown", "paper_count": 0})
+        by_venue: dict[str, dict] = defaultdict(
+            lambda: {"facts": [], "tier": "unknown", "paper_count": 0}
+        )
         paper_ids_by_venue: dict[str, set] = defaultdict(set)
 
         for fact in evidence.facts:

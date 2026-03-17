@@ -58,7 +58,10 @@ class ResearchPlanningLens(Lens):
             lens_name=self.name,
             title=self.title,
             content=data,
-            summary=f"Generated {len(data.get('directions', []))} research directions and {len(data.get('recommendations', []))} recommendations.",
+            summary=(
+                f"Generated {len(data.get('directions', []))} research directions "
+                f"and {len(data.get('recommendations', []))} recommendations."
+            ),
         )
 
     def _summarize(self, evidence: NormalizedEvidence) -> str:

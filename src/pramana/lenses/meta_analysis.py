@@ -11,7 +11,9 @@ from pramana.pipeline.corpus import Corpus
 from pramana.pipeline.hypothesis import HypothesisQuery
 from pramana.pipeline.normalization import NormalizedEvidence
 
-ACTIVATION_KEYWORDS = {"frequency", "trend", "rate", "prevalence", "common", "proportion", "how often"}
+ACTIVATION_KEYWORDS = {
+    "frequency", "trend", "rate", "prevalence", "common", "proportion", "how often",
+}
 
 
 class MetaAnalysisLens(Lens):
@@ -95,4 +97,6 @@ class MetaAnalysisLens(Lens):
     def _make_summary(self, stats: dict) -> str:
         top_terms = list(stats.get("top_terms", {}).items())[:5]
         term_str = ", ".join(f"{t} ({c})" for t, c in top_terms)
-        return f"Analyzed {stats.get('total_facts', 0)} facts across {stats.get('total_papers', 0)} papers. Top terms: {term_str}."
+        total_f = stats.get('total_facts', 0)
+        total_p = stats.get('total_papers', 0)
+        return f"Analyzed {total_f} facts across {total_p} papers. Top terms: {term_str}."

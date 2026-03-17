@@ -158,9 +158,9 @@ def _store_normalized_facts(
             category = categories.get(canonical, fact.fact_type)
 
             # Look up the ExtractedFact DB record
-            from pramana.models.schema import ExtractedFact as EFDB
+            from pramana.models.schema import ExtractedFact as ExtractedFactModel
             db_fact = (
-                session.query(EFDB)
+                session.query(ExtractedFactModel)
                 .filter_by(paper_id=fact.paper_id, content=fact.content)
                 .first()
             )
