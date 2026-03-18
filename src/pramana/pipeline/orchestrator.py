@@ -54,12 +54,13 @@ def run_analysis(
 
     for lens in ALL_LENSES:
         if lens.should_activate(query):
-            logger.info(f"Activating lens: {lens.name}")
+            logger.info("Activating lens: %s", lens.name)
             try:
                 result = lens.analyze(corpus, evidence, query, settings)
                 results.add(result)
+                logger.info("Lens '%s' completed: %s", lens.name, result.summary[:100])
             except Exception as e:
-                logger.error(f"Lens {lens.name} failed: {e}")
+                logger.error("Lens '%s' failed: %s", lens.name, e, exc_info=True)
                 results.add(LensResult(
                     lens_name=lens.name,
                     title=lens.title,

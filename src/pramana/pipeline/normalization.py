@@ -81,7 +81,8 @@ def normalize_evidence(
     # Step 1: Collect all terms that need normalization
     terms = set()
     for fact in facts:
-        terms.add(fact.content.strip())
+        if fact.content:
+            terms.add(fact.content.strip())
 
     # Step 2: Apply rule-based normalization first
     mappings: dict[str, str] = {}

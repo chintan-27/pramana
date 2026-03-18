@@ -40,6 +40,9 @@ def build_corpus(
 
     corpus = Corpus()
 
+    logger.info("Building corpus: %d queries, max_papers=%d",
+                 len(query.search_queries), max_papers)
+
     for search_query in query.search_queries:
         # Semantic Scholar
         try:
@@ -67,11 +70,14 @@ def build_corpus(
         except Exception as e:
             logger.warning(f"PubMed search failed: {e}")
 
+    logger.info("Raw papers collected: %d (before dedup)", len(all_papers))
+
     # Deduplicate by title similarity and IDs
     deduped = _deduplicate(all_papers)
 
     # Limit to max_papers
     deduped = deduped[:max_papers]
+    logger.info("After dedup + limit: %d papers", len(deduped))
 
     # Store in database and vector store
     stored = _store_papers(deduped, settings)
@@ -81,20 +87,24 @@ def build_corpus(
 
 
 def _deduplicate(papers: list[dict]) -> list[dict]:
-    """Remove duplicate papers based on DOI, arXiv ID, or title similarity."""
+    """Remove duplicate papers based on DOI, arXiv ID, S2 ID, or title."""
     seen_dois: set[str] = set()
     seen_arxiv: set[str] = set()
+    seen_s2: set[str] = set()
     seen_titles: set[str] = set()
     unique: list[dict] = []
 
     for paper in papers:
         doi = paper.get("doi")
         arxiv_id = paper.get("arxiv_id")
+        s2_id = paper.get("s2_id")
         title_key = paper.get("title", "").lower().strip()
 
         if doi and doi in seen_dois:
             continue
         if arxiv_id and arxiv_id in seen_arxiv:
+            continue
+        if s2_id and s2_id in seen_s2:
             continue
         if title_key in seen_titles:
             continue
@@ -103,6 +113,8 @@ def _deduplicate(papers: list[dict]) -> list[dict]:
             seen_dois.add(doi)
         if arxiv_id:
             seen_arxiv.add(arxiv_id)
+        if s2_id:
+            seen_s2.add(s2_id)
         if title_key:
             seen_titles.add(title_key)
 
@@ -126,6 +138,10 @@ def _store_papers(papers: list[dict], settings: Settings) -> list[dict]:
                 existing = session.query(Paper).filter_by(doi=paper_data["doi"]).first()
             if not existing and paper_data.get("arxiv_id"):
                 existing = session.query(Paper).filter_by(arxiv_id=paper_data["arxiv_id"]).first()
+            if not existing and paper_data.get("s2_id"):
+                existing = session.query(Paper).filter_by(s2_id=paper_data["s2_id"]).first()
+            if not existing and paper_data.get("pubmed_id"):
+                existing = session.query(Paper).filter_by(pubmed_id=paper_data["pubmed_id"]).first()
 
             if existing:
                 paper_data["db_id"] = existing.id

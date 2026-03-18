@@ -1,8 +1,16 @@
 """Semantic Scholar API client."""
 
+import logging
+import time
+
 import httpx
 
 from pramana.config import Settings
+
+logger = logging.getLogger(__name__)
+
+# Track last request time for rate limiting (1 req/s with API key)
+_last_request_time: float = 0.0
 
 S2_BASE_URL = "https://api.semanticscholar.org/graph/v1"
 S2_FIELDS = "title,authors,year,venue,externalIds,url,abstract,citationCount"
@@ -27,6 +35,8 @@ def search_papers(
     if year_range:
         params["year"] = f"{year_range[0]}-{year_range[1]}"
 
+    _rate_limit()
+    logger.info("S2 search: query=%r, limit=%d", query, limit)
     response = httpx.get(
         f"{S2_BASE_URL}/paper/search",
         params=params,
@@ -53,6 +63,7 @@ def search_papers(
             "abstract": item.get("abstract", ""),
         })
 
+    logger.info("S2 search returned %d papers", len(papers))
     return papers
 
 
@@ -62,6 +73,7 @@ def get_paper_details(paper_id: str, settings: Settings) -> dict | None:
     if settings.semantic_scholar_api_key:
         headers["x-api-key"] = settings.semantic_scholar_api_key
 
+    _rate_limit()
     response = httpx.get(
         f"{S2_BASE_URL}/paper/{paper_id}",
         params={"fields": S2_FIELDS + ",openAccessPdf"},
@@ -90,3 +102,13 @@ def get_paper_details(paper_id: str, settings: Settings) -> dict | None:
         "abstract": data.get("abstract", ""),
         "pdf_url": pdf_info.get("url"),
     }
+
+
+def _rate_limit() -> None:
+    """Enforce 1 request per second rate limit for Semantic Scholar API."""
+    global _last_request_time
+    now = time.monotonic()
+    elapsed = now - _last_request_time
+    if elapsed < 1.0:
+        time.sleep(1.0 - elapsed)
+    _last_request_time = time.monotonic()

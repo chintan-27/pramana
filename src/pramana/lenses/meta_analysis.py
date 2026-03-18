@@ -10,6 +10,7 @@ from pramana.llm.prompts import META_ANALYSIS_SYSTEM, META_ANALYSIS_USER
 from pramana.pipeline.corpus import Corpus
 from pramana.pipeline.hypothesis import HypothesisQuery
 from pramana.pipeline.normalization import NormalizedEvidence
+from pramana.pipeline.rag import format_retrieved_context, retrieve_relevant_evidence
 
 ACTIVATION_KEYWORDS = {
     "frequency", "trend", "rate", "prevalence", "common", "proportion", "how often",
@@ -36,8 +37,12 @@ class MetaAnalysisLens(Lens):
         # Compute basic statistics from evidence
         stats = self._compute_stats(corpus, evidence)
 
-        # Use LLM for deeper synthesis
+        # RAG: retrieve semantically relevant evidence
         hypothesis_text = " | ".join(query.topics) if query.topics else "General"
+        rag_results = retrieve_relevant_evidence(hypothesis_text, settings)
+        retrieved_context = format_retrieved_context(rag_results)
+
+        # Use LLM for deeper synthesis
         messages = [
             {"role": "system", "content": META_ANALYSIS_SYSTEM},
             {
@@ -45,6 +50,7 @@ class MetaAnalysisLens(Lens):
                 "content": META_ANALYSIS_USER.format(
                     hypothesis=hypothesis_text,
                     evidence_data=json.dumps(stats, indent=2),
+                    retrieved_context=retrieved_context,
                 ),
             },
         ]

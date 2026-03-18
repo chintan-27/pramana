@@ -25,8 +25,17 @@ def parse_hypothesis(
     hypothesis: str,
     initiation_type: str,
     settings: Settings,
+    prior_research: str = "",
 ) -> HypothesisQuery:
     """Parse a free-text hypothesis into a structured query plan using LLM."""
+    prior_section = ""
+    if prior_research and prior_research.strip():
+        prior_section = (
+            f"Prior research context provided by the user (use this to ground the "
+            f"search queries and identify related/continuing work):\n\n"
+            f"{prior_research.strip()[:5000]}\n"
+        )
+
     messages = [
         {"role": "system", "content": HYPOTHESIS_PARSING_SYSTEM},
         {
@@ -34,6 +43,7 @@ def parse_hypothesis(
             "content": HYPOTHESIS_PARSING_USER.format(
                 hypothesis=hypothesis,
                 initiation_type=initiation_type,
+                prior_research_section=prior_section,
             ),
         },
     ]

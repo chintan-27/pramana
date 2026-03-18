@@ -12,6 +12,7 @@ from pramana.models.schema import Venue
 from pramana.pipeline.corpus import Corpus
 from pramana.pipeline.hypothesis import HypothesisQuery
 from pramana.pipeline.normalization import NormalizedEvidence
+from pramana.pipeline.rag import format_retrieved_context, retrieve_relevant_evidence
 
 ACTIVATION_KEYWORDS = {"venue", "journal", "conference", "domain", "field", "tier", "publication"}
 
@@ -38,6 +39,10 @@ class VenueMappingLens(Lens):
 
         hypothesis_text = " | ".join(query.topics) if query.topics else "General"
 
+        # RAG: retrieve semantically relevant evidence
+        rag_results = retrieve_relevant_evidence(hypothesis_text, settings)
+        retrieved_context = format_retrieved_context(rag_results)
+
         # LLM analysis of venue patterns
         messages = [
             {"role": "system", "content": VENUE_MAPPING_SYSTEM},
@@ -46,6 +51,7 @@ class VenueMappingLens(Lens):
                 "content": VENUE_MAPPING_USER.format(
                     hypothesis=hypothesis_text,
                     venue_evidence=json.dumps(venue_evidence, indent=2),
+                    retrieved_context=retrieved_context,
                 ),
             },
         ]

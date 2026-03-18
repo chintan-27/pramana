@@ -4,6 +4,7 @@ export interface AnalyzeRequest {
   hypothesis: string;
   initiation_type: string;
   max_papers: number;
+  prior_research?: string;
 }
 
 export interface AnalyzeResponse {

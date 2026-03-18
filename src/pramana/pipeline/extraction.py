@@ -63,8 +63,8 @@ def extract_evidence_from_text(
             if not fact_data.get("direct_quote") or not fact_data.get("location"):
                 continue
             facts.append(ExtractedFact(
-                fact_type=fact_data.get("fact_type", "unknown"),
-                content=fact_data.get("content", ""),
+                fact_type=fact_data.get("fact_type", "unknown") or "unknown",
+                content=fact_data.get("content", "") or "",
                 direct_quote=fact_data["direct_quote"],
                 location=fact_data["location"],
                 paper_title=title,
@@ -84,16 +84,19 @@ def extract_all_evidence(
     all_facts: list[ExtractedFact] = []
     hypothesis_text = " ".join(query.topics) if query.topics else ""
 
+    logger.info("Extracting evidence from %d papers", len(corpus.papers))
+
     for paper in corpus.papers:
         # Use full text if available, fall back to abstract
-        text = paper.get("full_text") or paper.get("abstract", "")
+        text = paper.get("full_text") or paper.get("abstract") or ""
         title = paper.get("title", "Unknown")
         paper_db_id = paper.get("db_id")
 
-        if not text.strip():
+        if not text or not text.strip():
             continue
 
         facts = extract_evidence_from_text(text, title, hypothesis_text, settings)
+        logger.debug("Paper '%s': extracted %d facts", title[:50], len(facts))
 
         # Store in database
         if paper_db_id and facts:

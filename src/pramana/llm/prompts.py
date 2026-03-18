@@ -17,7 +17,7 @@ HYPOTHESIS_PARSING_USER = """Parse this research hypothesis into a structured qu
 
 Hypothesis: {hypothesis}
 Research initiation type: {initiation_type}
-
+{prior_research_section}
 Respond with valid JSON only."""
 
 EVIDENCE_EXTRACTION_SYSTEM = """You are a scientific evidence extraction expert. Your task is to extract structured factual information from a research paper, conditioned on a specific hypothesis.
@@ -79,6 +79,8 @@ Hypothesis: {hypothesis}
 Evidence summary:
 {evidence_summary}
 
+{retrieved_context}
+
 Corpus stats:
 - Total papers: {total_papers}
 - Date range: {date_range}
@@ -103,6 +105,8 @@ Hypothesis: {hypothesis}
 Evidence data:
 {evidence_data}
 
+{retrieved_context}
+
 Respond with valid JSON: {{"frequency_stats": [...], "temporal_trends": [...], "concentration_patterns": [...], "co_occurrences": [...]}}"""
 
 VENUE_MAPPING_SYSTEM = """You are a research venue analysis expert. Given evidence organized by venue, analyze how research practices differ across venue types, tiers, and domains.
@@ -115,6 +119,8 @@ Hypothesis: {hypothesis}
 
 Venue-organized evidence:
 {venue_evidence}
+
+{retrieved_context}
 
 Respond with valid JSON: {{"venue_analysis": [{{"venue": "...", "tier": "...", "patterns": [...], "notable_differences": [...]}}]}}"""
 
@@ -138,5 +144,7 @@ Gaps identified:
 
 Evidence summary:
 {evidence_summary}
+
+{retrieved_context}
 
 Respond with valid JSON: {{"directions": [...], "evaluation_expectations": [...], "design_patterns": [...], "recommendations": [...]}}"""

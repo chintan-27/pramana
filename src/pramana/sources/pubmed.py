@@ -1,10 +1,13 @@
 """PubMed E-utilities (Entrez) API client."""
 
+import logging
 import xml.etree.ElementTree as ET
 
 import httpx
 
 from pramana.config import Settings
+
+logger = logging.getLogger(__name__)
 
 EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
@@ -35,6 +38,7 @@ def search_papers(
     search_data = search_resp.json()
 
     id_list = search_data.get("esearchresult", {}).get("idlist", [])
+    logger.info("PubMed search: query=%r → %d PMIDs", query, len(id_list))
     if not id_list:
         return []
 
@@ -54,7 +58,9 @@ def search_papers(
     )
     fetch_resp.raise_for_status()
 
-    return _parse_pubmed_xml(fetch_resp.text)
+    papers = _parse_pubmed_xml(fetch_resp.text)
+    logger.info("PubMed fetch returned %d papers", len(papers))
+    return papers
 
 
 def _parse_pubmed_xml(xml_text: str) -> list[dict]:

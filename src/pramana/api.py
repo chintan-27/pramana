@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import logging
+import traceback
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -16,6 +18,8 @@ from pramana.models.schema import AnalysisRun, Hypothesis, Paper
 from pramana.models.schema import ExtractedFact as ExtractedFactDB
 from pramana.models.vectors import get_chroma_client, get_evidence_collection, search_evidence
 
+logger = logging.getLogger(__name__)
+
 # In-memory store for running analyses
 _analysis_store: dict[str, dict] = {}
 _ws_connections: dict[str, list[WebSocket]] = {}
@@ -24,11 +28,25 @@ _ws_connections: dict[str, list[WebSocket]] = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize database on startup."""
+    # Configure logging for all pramana modules
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    # Set pramana loggers to DEBUG for detailed output
+    logging.getLogger("pramana").setLevel(logging.DEBUG)
+    # Quieten noisy libraries
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("chromadb").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+
     settings = get_settings()
     settings.ensure_dirs()
     engine = get_engine(settings)
     create_tables(engine)
     seed_venues(settings)
+    logger.info("Pramana API started (LLM: %s @ %s)", settings.llm_model, settings.llm_base_url)
     yield
 
 
@@ -54,6 +72,7 @@ class AnalyzeRequest(BaseModel):
     hypothesis: str
     initiation_type: str = "new"
     max_papers: int = 50
+    prior_research: str = ""
 
 
 class AnalyzeResponse(BaseModel):
@@ -129,6 +148,7 @@ async def start_analysis(request: AnalyzeRequest, background_tasks: BackgroundTa
         "hypothesis": request.hypothesis,
         "initiation_type": request.initiation_type,
         "max_papers": request.max_papers,
+        "prior_research": request.prior_research,
         "progress": {},
         "result": None,
         "error": None,
@@ -283,56 +303,74 @@ async def ws_analysis_progress(websocket: WebSocket, run_id: str):
 
 # --- Background task ---
 
-async def _run_analysis(run_id: str) -> None:
+def _run_analysis(run_id: str) -> None:
     """Execute the full analysis pipeline as a background task."""
     settings = get_settings()
     store = _analysis_store[run_id]
 
     try:
         store["status"] = "running"
+        logger.info("[%s] Pipeline started: %s", run_id[:8], store["hypothesis"][:80])
 
         # Stage 1: Parse hypothesis
         store["stage"] = "parsing"
         store["progress"] = {"step": 1, "total": 6, "description": "Parsing hypothesis"}
+        logger.info("[%s] Stage 1/6: Parsing hypothesis", run_id[:8])
         from pramana.pipeline.hypothesis import parse_hypothesis
-        parsed = parse_hypothesis(store["hypothesis"], store["initiation_type"], settings)
+        parsed = parse_hypothesis(store["hypothesis"], store["initiation_type"], settings, prior_research=store.get("prior_research", ""))
         store["progress"]["parsed"] = parsed.model_dump()
+        logger.info("[%s] Parsed → %d domains, %d topics, %d queries",
+                    run_id[:8], len(parsed.domains), len(parsed.topics), len(parsed.search_queries))
 
         # Stage 2: Build corpus
         store["stage"] = "retrieval"
         store["progress"] = {"step": 2, "total": 6, "description": "Retrieving papers"}
+        logger.info("[%s] Stage 2/6: Retrieving papers (max=%d)", run_id[:8], store["max_papers"])
         from pramana.pipeline.corpus import build_corpus
         corpus = build_corpus(parsed, max_papers=store["max_papers"], settings=settings)
         store["progress"]["papers_found"] = len(corpus.papers)
+        logger.info("[%s] Corpus: %d papers (S2=%d, arXiv=%d, PubMed=%d)",
+                    run_id[:8], len(corpus.papers), corpus.total_from_s2,
+                    corpus.total_from_arxiv, corpus.total_from_pubmed)
 
         # Stage 3: Extract evidence
         store["stage"] = "extraction"
         store["progress"] = {"step": 3, "total": 6, "description": "Extracting evidence"}
+        logger.info("[%s] Stage 3/6: Extracting evidence from %d papers",
+                    run_id[:8], len(corpus.papers))
         from pramana.pipeline.extraction import extract_all_evidence
         evidence = extract_all_evidence(corpus, parsed, settings)
         store["progress"]["facts_extracted"] = len(evidence)
+        logger.info("[%s] Extracted %d facts", run_id[:8], len(evidence))
 
         # Stage 4: Normalize
         store["stage"] = "normalization"
         store["progress"] = {"step": 4, "total": 6, "description": "Normalizing evidence"}
+        logger.info("[%s] Stage 4/6: Normalizing %d facts", run_id[:8], len(evidence))
         from pramana.pipeline.normalization import normalize_evidence
         normalized = normalize_evidence(evidence, settings)
+        logger.info("[%s] Normalized: %d mappings, %d categories",
+                    run_id[:8], len(normalized.canonical_mappings), len(normalized.categories))
 
         # Stage 5: Run analysis
         store["stage"] = "analysis"
         store["progress"] = {"step": 5, "total": 6, "description": "Running analytical lenses"}
+        logger.info("[%s] Stage 5/6: Running analytical lenses", run_id[:8])
         from pramana.pipeline.orchestrator import run_analysis as run_lenses
         results = run_lenses(corpus, normalized, parsed, settings)
+        logger.info("[%s] Lenses completed: %s", run_id[:8], ", ".join(results.active_lenses))
 
         # Stage 6: Generate report
         store["stage"] = "report"
         store["progress"] = {"step": 6, "total": 6, "description": "Generating report"}
+        logger.info("[%s] Stage 6/6: Generating report", run_id[:8])
         from pramana.report.generator import generate_report
         report_json = generate_report(results, parsed, "json", settings)
 
         store["status"] = "completed"
         store["stage"] = "done"
         store["result"] = json.loads(report_json)
+        logger.info("[%s] Pipeline completed successfully", run_id[:8])
 
         # Update DB
         with get_session(settings) as session:
@@ -344,6 +382,8 @@ async def _run_analysis(run_id: str) -> None:
     except Exception as e:
         store["status"] = "failed"
         store["error"] = str(e)
+        logger.error("[%s] Pipeline FAILED at stage '%s': %s", run_id[:8], store["stage"], e)
+        logger.debug("[%s] Traceback:\n%s", run_id[:8], traceback.format_exc())
 
         with get_session(settings) as session:
             db_run = session.get(AnalysisRun, store["db_run_id"])

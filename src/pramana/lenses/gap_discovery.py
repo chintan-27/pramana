@@ -9,6 +9,7 @@ from pramana.llm.prompts import GAP_DISCOVERY_SYSTEM, GAP_DISCOVERY_USER
 from pramana.pipeline.corpus import Corpus
 from pramana.pipeline.hypothesis import HypothesisQuery
 from pramana.pipeline.normalization import NormalizedEvidence
+from pramana.pipeline.rag import format_retrieved_context, retrieve_relevant_evidence
 
 
 class GapDiscoveryLens(Lens):
@@ -31,6 +32,10 @@ class GapDiscoveryLens(Lens):
         evidence_summary = self._build_summary(evidence)
         hypothesis_text = " | ".join(query.topics) if query.topics else "General analysis"
 
+        # RAG: retrieve semantically relevant evidence
+        rag_results = retrieve_relevant_evidence(hypothesis_text, settings)
+        retrieved_context = format_retrieved_context(rag_results)
+
         years = [p.get("year") for p in corpus.papers if p.get("year")]
         date_range = f"{min(years)}-{max(years)}" if years else "unknown"
 
@@ -41,6 +46,7 @@ class GapDiscoveryLens(Lens):
                 "content": GAP_DISCOVERY_USER.format(
                     hypothesis=hypothesis_text,
                     evidence_summary=evidence_summary,
+                    retrieved_context=retrieved_context,
                     total_papers=len(corpus.papers),
                     date_range=date_range,
                 ),

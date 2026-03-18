@@ -91,8 +91,9 @@ def test_gap_discovery_always_active():
     assert lens.should_activate(_make_query()) is True
 
 
+@patch("pramana.lenses.gap_discovery.retrieve_relevant_evidence", return_value=[])
 @patch("pramana.lenses.gap_discovery.chat_json")
-def test_gap_discovery_analyze(mock_chat, settings):
+def test_gap_discovery_analyze(mock_chat, mock_rag, settings):
     mock_chat.return_value = json.dumps({
         "gaps": [{"description": "Limited external validation", "evidence": "Only 1/2 papers", "severity": "high", "supporting_papers": []}]
     })
@@ -113,8 +114,9 @@ def test_meta_analysis_activation():
     assert lens.should_activate(_make_query(topics=["deep learning"], evaluation_focus=["accuracy"])) is False
 
 
+@patch("pramana.lenses.meta_analysis.retrieve_relevant_evidence", return_value=[])
 @patch("pramana.lenses.meta_analysis.chat_json")
-def test_meta_analysis_analyze(mock_chat, settings):
+def test_meta_analysis_analyze(mock_chat, mock_rag, settings):
     mock_chat.return_value = json.dumps({
         "frequency_stats": [], "temporal_trends": [],
         "concentration_patterns": [], "co_occurrences": [],
@@ -133,8 +135,9 @@ def test_venue_mapping_activation():
     assert lens.should_activate(_make_query(topics=["deep learning"], domains=["bme"], evaluation_focus=["accuracy"])) is False
 
 
+@patch("pramana.lenses.venue_mapping.retrieve_relevant_evidence", return_value=[])
 @patch("pramana.lenses.venue_mapping.chat_json")
-def test_venue_mapping_analyze(mock_chat, settings):
+def test_venue_mapping_analyze(mock_chat, mock_rag, settings):
     mock_chat.return_value = json.dumps({"venue_analysis": []})
     lens = VenueMappingLens()
     result = lens.analyze(_make_corpus(), _make_evidence(), _make_query(), settings)
@@ -150,8 +153,9 @@ def test_research_planning_activation():
     assert lens.should_activate(_make_query(initiation_context="continuation of prior work")) is False
 
 
+@patch("pramana.lenses.research_planning.retrieve_relevant_evidence", return_value=[])
 @patch("pramana.lenses.research_planning.chat_json")
-def test_research_planning_analyze(mock_chat, settings):
+def test_research_planning_analyze(mock_chat, mock_rag, settings):
     mock_chat.return_value = json.dumps({
         "directions": [{"area": "Multi-site validation"}],
         "evaluation_expectations": [],
@@ -166,10 +170,14 @@ def test_research_planning_analyze(mock_chat, settings):
 
 # --- Orchestrator ---
 
+@patch("pramana.lenses.research_planning.retrieve_relevant_evidence", return_value=[])
+@patch("pramana.lenses.research_planning.chat_json")
+@patch("pramana.lenses.gap_discovery.retrieve_relevant_evidence", return_value=[])
 @patch("pramana.lenses.gap_discovery.chat_json")
-def test_orchestrator_activates_correct_lenses(mock_chat, settings):
+def test_orchestrator_activates_correct_lenses(mock_chat_gap, mock_rag_gap, mock_chat_plan, mock_rag_plan, settings):
     """Orchestrator activates evidence_table + gap_discovery + research_planning for 'new' type."""
-    mock_chat.return_value = json.dumps({"gaps": []})
+    mock_chat_gap.return_value = json.dumps({"gaps": []})
+    mock_chat_plan.return_value = json.dumps({"directions": [], "evaluation_expectations": [], "design_patterns": [], "recommendations": []})
     query = _make_query(initiation_context="new research project")
     results = run_analysis(_make_corpus(), _make_evidence(), query, settings)
 

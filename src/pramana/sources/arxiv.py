@@ -1,10 +1,13 @@
 """arXiv API client."""
 
+import logging
 import xml.etree.ElementTree as ET
 
 import httpx
 
-ARXIV_API_URL = "http://export.arxiv.org/api/query"
+logger = logging.getLogger(__name__)
+
+ARXIV_API_URL = "https://export.arxiv.org/api/query"
 ATOM_NS = "{http://www.w3.org/2005/Atom}"
 
 
@@ -21,10 +24,13 @@ def search_papers(
         "sortOrder": "descending",
     }
 
-    response = httpx.get(ARXIV_API_URL, params=params, timeout=30.0)
+    logger.info("arXiv search: query=%r, max_results=%d", query, max_results)
+    response = httpx.get(ARXIV_API_URL, params=params, timeout=30.0, follow_redirects=True)
     response.raise_for_status()
 
-    return _parse_atom_response(response.text)
+    papers = _parse_atom_response(response.text)
+    logger.info("arXiv search returned %d papers", len(papers))
+    return papers
 
 
 def _parse_atom_response(xml_text: str) -> list[dict]:

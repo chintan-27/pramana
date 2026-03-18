@@ -9,6 +9,7 @@ from pramana.llm.prompts import RESEARCH_PLANNING_SYSTEM, RESEARCH_PLANNING_USER
 from pramana.pipeline.corpus import Corpus
 from pramana.pipeline.hypothesis import HypothesisQuery
 from pramana.pipeline.normalization import NormalizedEvidence
+from pramana.pipeline.rag import format_retrieved_context, retrieve_relevant_evidence
 
 ACTIVATION_TYPES = {"new", "joining"}
 
@@ -35,6 +36,10 @@ class ResearchPlanningLens(Lens):
         evidence_summary = self._summarize(evidence)
         hypothesis_text = " | ".join(query.topics) if query.topics else "General"
 
+        # RAG: retrieve semantically relevant evidence
+        rag_results = retrieve_relevant_evidence(hypothesis_text, settings)
+        retrieved_context = format_retrieved_context(rag_results)
+
         messages = [
             {"role": "system", "content": RESEARCH_PLANNING_SYSTEM},
             {
@@ -44,6 +49,7 @@ class ResearchPlanningLens(Lens):
                     initiation_type=query.initiation_context,
                     gaps="See evidence summary for patterns.",
                     evidence_summary=evidence_summary,
+                    retrieved_context=retrieved_context,
                 ),
             },
         ]
