@@ -48,6 +48,20 @@ async def lifespan(app: FastAPI):
     engine = get_engine(settings)
     create_tables(engine)
     seed_venues(settings)
+
+    # Check if existing DB needs migration for new columns
+    try:
+        import sqlalchemy
+        inspector = sqlalchemy.inspect(engine)
+        columns = [c["name"] for c in inspector.get_columns("extracted_facts")]
+        if "confidence" not in columns:
+            logger.warning(
+                "DB migration needed: 'extracted_facts' table is missing 'confidence' column. "
+                "Run: ALTER TABLE extracted_facts ADD COLUMN confidence REAL DEFAULT 0.0"
+            )
+    except Exception:
+        pass  # Table may not exist yet — create_tables will handle it
+
     logger.info("Pramana API started (LLM: %s @ %s)", settings.llm_model, settings.llm_base_url)
     yield
 
@@ -330,6 +344,7 @@ async def get_paper(paper_id: int):
                     "content": f.content,
                     "direct_quote": f.direct_quote,
                     "location": f.location,
+                    "confidence": f.confidence or 0.0,
                 }
                 for f in facts
             ],
@@ -549,7 +564,10 @@ def _run_analysis(run_id: str) -> None:
         store["progress"] = {"step": 1, "total": 7, "description": "Parsing hypothesis"}
         logger.info("[%s] Stage 1/7: Parsing hypothesis", run_id[:8])
         from pramana.pipeline.hypothesis import parse_hypothesis
-        parsed = parse_hypothesis(store["hypothesis"], store["initiation_type"], settings, prior_research=store.get("prior_research", ""))
+        parsed = parse_hypothesis(
+            store["hypothesis"], store["initiation_type"], settings,
+            prior_research=store.get("prior_research", ""),
+        )
         store["progress"]["parsed"] = parsed.model_dump()
         logger.info("[%s] Parsed → %d domains, %d topics, %d queries",
                     run_id[:8], len(parsed.domains), len(parsed.topics), len(parsed.search_queries))
@@ -580,7 +598,10 @@ def _run_analysis(run_id: str) -> None:
         passed_count = len(corpus.papers) - screened_count
         store["progress"]["papers_screened_out"] = screened_count
         store["progress"]["papers_passed"] = passed_count
-        logger.info("[%s] Screening: %d passed, %d filtered", run_id[:8], passed_count, screened_count)
+        logger.info(
+            "[%s] Screening: %d passed, %d filtered",
+            run_id[:8], passed_count, screened_count,
+        )
 
         # Stage 4: Extract evidence
         store["stage"] = "extraction"
