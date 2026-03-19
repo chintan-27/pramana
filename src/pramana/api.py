@@ -16,7 +16,7 @@ from starlette.responses import StreamingResponse
 from pramana.config import get_settings
 from pramana.llm.sanitize import sanitize_user_input
 from pramana.models.database import create_tables, get_engine, get_session, seed_venues
-from pramana.models.schema import AnalysisRun, Hypothesis, Paper
+from pramana.models.schema import AnalysisRun, ExpertFeedback, Hypothesis, Paper
 from pramana.models.schema import ExtractedFact as ExtractedFactDB
 from pramana.models.vectors import get_chroma_client, get_evidence_collection, search_evidence
 
@@ -129,6 +129,20 @@ class PaperResponse(BaseModel):
 class EvidenceSearchResponse(BaseModel):
     results: list[dict]
     total: int
+
+
+class FeedbackRequest(BaseModel):
+    fact_id: int
+    action: str  # "confirm", "reject", "comment"
+    comment: str = ""
+
+
+class FeedbackResponse(BaseModel):
+    id: int
+    fact_id: int
+    action: str
+    comment: str
+    created_at: str
 
 
 class VenueResponse(BaseModel):
@@ -510,6 +524,58 @@ async def chat_with_report(run_id: str, request: ChatRequest):
     except Exception as e:
         logger.error("Chat LLM call failed: %s", e)
         raise HTTPException(500, "Failed to generate response")
+
+
+@app.post("/api/feedback", response_model=FeedbackResponse)
+async def submit_feedback(request: FeedbackRequest):
+    """Submit expert feedback on an extracted fact."""
+    if request.action not in ("confirm", "reject", "comment"):
+        raise HTTPException(400, "Action must be 'confirm', 'reject', or 'comment'")
+
+    settings = get_settings()
+    with get_session(settings) as session:
+        fact = session.get(ExtractedFactDB, request.fact_id)
+        if not fact:
+            raise HTTPException(404, "Fact not found")
+
+        fb = ExpertFeedback(
+            fact_id=request.fact_id,
+            action=request.action,
+            comment=request.comment,
+        )
+        session.add(fb)
+        session.flush()
+
+        return FeedbackResponse(
+            id=fb.id,
+            fact_id=fb.fact_id,
+            action=fb.action,
+            comment=fb.comment or "",
+            created_at=fb.created_at.isoformat() if fb.created_at else "",
+        )
+
+
+@app.get("/api/feedback/{fact_id}", response_model=list[FeedbackResponse])
+async def get_feedback(fact_id: int):
+    """Get all feedback for a specific fact."""
+    settings = get_settings()
+    with get_session(settings) as session:
+        feedbacks = (
+            session.query(ExpertFeedback)
+            .filter(ExpertFeedback.fact_id == fact_id)
+            .order_by(ExpertFeedback.created_at.desc())
+            .all()
+        )
+        return [
+            FeedbackResponse(
+                id=fb.id,
+                fact_id=fb.fact_id,
+                action=fb.action,
+                comment=fb.comment or "",
+                created_at=fb.created_at.isoformat() if fb.created_at else "",
+            )
+            for fb in feedbacks
+        ]
 
 
 def _build_report_summary(report_data: dict, max_chars: int = 8000) -> str:

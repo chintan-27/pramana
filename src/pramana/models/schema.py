@@ -1,7 +1,7 @@
 """SQLAlchemy ORM models for Pramana."""
 
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, relationship
 
 
@@ -76,6 +76,7 @@ class ExtractedFact(Base):
     content = Column(Text, nullable=False)
     direct_quote = Column(Text, nullable=False)
     location = Column(String(200), nullable=False)
+    confidence = Column(Float, default=0.0)
     created_at = Column(DateTime, default=func.now())
 
     paper = relationship("Paper", back_populates="extracted_facts")
@@ -117,3 +118,15 @@ class AnalysisRun(Base):
     completed_at = Column(DateTime)
 
     hypothesis = relationship("Hypothesis", back_populates="analysis_runs")
+
+
+class ExpertFeedback(Base):
+    __tablename__ = "expert_feedback"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    fact_id = Column(Integer, ForeignKey("extracted_facts.id"), nullable=False)
+    action = Column(String(20), nullable=False)  # confirm, reject, comment
+    comment = Column(Text)
+    created_at = Column(DateTime, default=func.now())
+
+    fact = relationship("ExtractedFact")
