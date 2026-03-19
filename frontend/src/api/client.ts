@@ -5,6 +5,7 @@ export interface AnalyzeRequest {
   initiation_type: string;
   max_papers: number;
   prior_research?: string;
+  pdf_file_ids?: string[];
 }
 
 export interface AnalyzeResponse {
@@ -37,6 +38,7 @@ export interface Fact {
   content: string;
   direct_quote: string;
   location: string;
+  confidence: number;
 }
 
 export interface EvidenceSearchResult {
@@ -109,12 +111,82 @@ export async function getVenues(domain?: string): Promise<Venue[]> {
   return res.json();
 }
 
-export function connectWebSocket(runId: string, onMessage: (data: RunStatus) => void): WebSocket {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const ws = new WebSocket(`${protocol}//${window.location.host}/api/ws/analyze/${runId}`);
-  ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    onMessage(data);
-  };
-  return ws;
+export interface ReportListItem {
+  run_id: number;
+  hypothesis: string;
+  completed_at: string | null;
+  paper_count: number;
 }
+
+export async function getReports(): Promise<ReportListItem[]> {
+  const res = await fetch(`${BASE_URL}/reports`);
+  if (!res.ok) throw new Error(`Failed to get reports: ${res.statusText}`);
+  const data = await res.json();
+  return data.reports;
+}
+
+export async function getSavedReport(runId: number): Promise<Report> {
+  const res = await fetch(`${BASE_URL}/reports/${runId}`);
+  if (!res.ok) throw new Error(`Failed to get report: ${res.statusText}`);
+  const data = await res.json();
+  return data.report;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export async function chatWithReport(
+  runId: string | number,
+  message: string,
+  history: ChatMessage[],
+): Promise<{ response: string }> {
+  const res = await fetch(`${BASE_URL}/reports/${runId}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, history }),
+  });
+  if (!res.ok) throw new Error(`Chat failed: ${res.statusText}`);
+  return res.json();
+}
+
+export interface PdfUploadResult {
+  file_id: string;
+  filename: string;
+  page_count: number;
+  char_count: number;
+  text_preview: string;
+}
+
+export async function uploadPdf(file: File): Promise<PdfUploadResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${BASE_URL}/upload-pdf`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail.detail || `Upload failed: ${res.statusText}`);
+  }
+  return res.json();
+}
+
+export function streamAnalysisProgress(
+  runId: string,
+  onEvent: (data: RunStatus) => void,
+  onError?: (err: Event) => void,
+): EventSource {
+  const es = new EventSource(`${BASE_URL}/analyze/${runId}/stream`);
+  es.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    onEvent(data);
+  };
+  es.onerror = (err) => {
+    if (onError) onError(err);
+    es.close();
+  };
+  return es;
+}
+
