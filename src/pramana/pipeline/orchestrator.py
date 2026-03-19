@@ -4,10 +4,13 @@ import logging
 
 from pramana.config import Settings
 from pramana.lenses.base import Lens, LensResult
+from pramana.lenses.bias_detection import BiasDetectionLens
 from pramana.lenses.evidence_table import EvidenceTableLens
 from pramana.lenses.gap_discovery import GapDiscoveryLens
+from pramana.lenses.knowledge_graph import KnowledgeGraphLens
 from pramana.lenses.meta_analysis import MetaAnalysisLens
 from pramana.lenses.research_planning import ResearchPlanningLens
+from pramana.lenses.trace_ancestry import TraceAncestryLens
 from pramana.lenses.venue_mapping import VenueMappingLens
 from pramana.pipeline.corpus import Corpus
 from pramana.pipeline.hypothesis import HypothesisQuery
@@ -19,8 +22,11 @@ logger = logging.getLogger(__name__)
 ALL_LENSES: list[Lens] = [
     EvidenceTableLens(),
     GapDiscoveryLens(),
+    BiasDetectionLens(),
     MetaAnalysisLens(),
     VenueMappingLens(),
+    KnowledgeGraphLens(),
+    TraceAncestryLens(),
     ResearchPlanningLens(),
 ]
 

@@ -4,10 +4,13 @@ import json
 from unittest.mock import patch
 
 from pramana.lenses.base import LensResult
+from pramana.lenses.bias_detection import BiasDetectionLens
 from pramana.lenses.evidence_table import EvidenceTableLens
 from pramana.lenses.gap_discovery import GapDiscoveryLens
+from pramana.lenses.knowledge_graph import KnowledgeGraphLens
 from pramana.lenses.meta_analysis import MetaAnalysisLens
 from pramana.lenses.research_planning import ResearchPlanningLens
+from pramana.lenses.trace_ancestry import TraceAncestryLens
 from pramana.lenses.venue_mapping import VenueMappingLens
 from pramana.pipeline.corpus import Corpus
 from pramana.pipeline.extraction import ExtractedFact
@@ -107,11 +110,10 @@ def test_gap_discovery_analyze(mock_chat, mock_rag, settings):
 
 def test_meta_analysis_activation():
     lens = MetaAnalysisLens()
-    # Should activate when topics mention frequency/trend
+    # Always activates — year/venue/term distributions are always useful
     assert lens.should_activate(_make_query(topics=["frequency of validation"])) is True
     assert lens.should_activate(_make_query(evaluation_focus=["prevalence of external test"])) is True
-    # Should not activate for unrelated topics
-    assert lens.should_activate(_make_query(topics=["deep learning"], evaluation_focus=["accuracy"])) is False
+    assert lens.should_activate(_make_query(topics=["deep learning"], evaluation_focus=["accuracy"])) is True
 
 
 @patch("pramana.lenses.meta_analysis.retrieve_relevant_evidence", return_value=[])
@@ -131,8 +133,9 @@ def test_meta_analysis_analyze(mock_chat, mock_rag, settings):
 
 def test_venue_mapping_activation():
     lens = VenueMappingLens()
+    # Always activates — venue context is always useful
     assert lens.should_activate(_make_query(topics=["venue differences"])) is True
-    assert lens.should_activate(_make_query(topics=["deep learning"], domains=["bme"], evaluation_focus=["accuracy"])) is False
+    assert lens.should_activate(_make_query(topics=["deep learning"], domains=["bme"], evaluation_focus=["accuracy"])) is True
 
 
 @patch("pramana.lenses.venue_mapping.retrieve_relevant_evidence", return_value=[])
@@ -168,22 +171,109 @@ def test_research_planning_analyze(mock_chat, mock_rag, settings):
     assert len(result.content.get("directions", [])) == 1
 
 
+# --- Bias Detection Lens ---
+
+def test_bias_detection_always_active():
+    lens = BiasDetectionLens()
+    assert lens.should_activate(_make_query()) is True
+
+
+@patch("pramana.lenses.bias_detection.retrieve_relevant_evidence", return_value=[])
+@patch("pramana.lenses.bias_detection.chat_json")
+def test_bias_detection_analyze(mock_chat, mock_rag, settings):
+    mock_chat.return_value = json.dumps({
+        "biases": [{"type": "dataset_concentration", "description": "Most use ChestX-ray14", "evidence": "3/4 papers", "severity": "medium"}]
+    })
+    lens = BiasDetectionLens()
+    result = lens.analyze(_make_corpus(), _make_evidence(), _make_query(), settings)
+    assert result.lens_name == "bias_detection"
+    assert len(result.content["biases"]) == 1
+
+
+# --- Knowledge Graph Lens ---
+
+def test_knowledge_graph_always_active():
+    lens = KnowledgeGraphLens()
+    assert lens.should_activate(_make_query()) is True
+
+
+@patch("pramana.lenses.knowledge_graph.retrieve_relevant_evidence", return_value=[])
+@patch("pramana.lenses.knowledge_graph.chat_json")
+def test_knowledge_graph_analyze(mock_chat, mock_rag, settings):
+    mock_chat.return_value = json.dumps({
+        "entities": [{"name": "ChestX-ray14", "type": "dataset", "papers": ["Paper A"]}],
+        "relationships": [{"source": "ResNet-50", "target": "ChestX-ray14", "relation": "evaluated_on", "papers": ["Paper A"]}],
+    })
+    lens = KnowledgeGraphLens()
+    result = lens.analyze(_make_corpus(), _make_evidence(), _make_query(), settings)
+    assert result.lens_name == "knowledge_graph"
+    assert len(result.content["entities"]) == 1
+    assert len(result.content["relationships"]) == 1
+
+
+# --- TRACE/Ancestry Lens ---
+
+def test_trace_ancestry_always_active():
+    lens = TraceAncestryLens()
+    assert lens.should_activate(_make_query()) is True
+
+
+@patch("pramana.lenses.trace_ancestry.retrieve_relevant_evidence", return_value=[])
+@patch("pramana.lenses.trace_ancestry.chat_json")
+def test_trace_ancestry_analyze(mock_chat, mock_rag, settings):
+    mock_chat.return_value = json.dumps({
+        "lineages": [{"name": "CNN architectures", "evolution": [{"year": "2015", "description": "ResNet introduced", "papers": ["Paper A"]}]}],
+        "paradigm_shifts": [],
+        "current_frontier": ["Vision transformers"],
+    })
+    lens = TraceAncestryLens()
+    result = lens.analyze(_make_corpus(), _make_evidence(), _make_query(), settings)
+    assert result.lens_name == "trace_ancestry"
+    assert len(result.content["lineages"]) == 1
+
+
 # --- Orchestrator ---
 
+@patch("pramana.lenses.trace_ancestry.retrieve_relevant_evidence", return_value=[])
+@patch("pramana.lenses.trace_ancestry.chat_json")
+@patch("pramana.lenses.knowledge_graph.retrieve_relevant_evidence", return_value=[])
+@patch("pramana.lenses.knowledge_graph.chat_json")
+@patch("pramana.lenses.bias_detection.retrieve_relevant_evidence", return_value=[])
+@patch("pramana.lenses.bias_detection.chat_json")
+@patch("pramana.lenses.venue_mapping.retrieve_relevant_evidence", return_value=[])
+@patch("pramana.lenses.venue_mapping.chat_json")
+@patch("pramana.lenses.meta_analysis.retrieve_relevant_evidence", return_value=[])
+@patch("pramana.lenses.meta_analysis.chat_json")
 @patch("pramana.lenses.research_planning.retrieve_relevant_evidence", return_value=[])
 @patch("pramana.lenses.research_planning.chat_json")
 @patch("pramana.lenses.gap_discovery.retrieve_relevant_evidence", return_value=[])
 @patch("pramana.lenses.gap_discovery.chat_json")
-def test_orchestrator_activates_correct_lenses(mock_chat_gap, mock_rag_gap, mock_chat_plan, mock_rag_plan, settings):
-    """Orchestrator activates evidence_table + gap_discovery + research_planning for 'new' type."""
+def test_orchestrator_activates_correct_lenses(
+    mock_chat_gap, mock_rag_gap,
+    mock_chat_plan, mock_rag_plan,
+    mock_chat_meta, mock_rag_meta,
+    mock_chat_venue, mock_rag_venue,
+    mock_chat_bias, mock_rag_bias,
+    mock_chat_kg, mock_rag_kg,
+    mock_chat_trace, mock_rag_trace,
+    settings,
+):
+    """Orchestrator activates all lenses for 'new' type."""
     mock_chat_gap.return_value = json.dumps({"gaps": []})
     mock_chat_plan.return_value = json.dumps({"directions": [], "evaluation_expectations": [], "design_patterns": [], "recommendations": []})
+    mock_chat_meta.return_value = json.dumps({"frequency_stats": [], "temporal_trends": [], "concentration_patterns": [], "co_occurrences": []})
+    mock_chat_venue.return_value = json.dumps({"venue_analysis": []})
+    mock_chat_bias.return_value = json.dumps({"biases": []})
+    mock_chat_kg.return_value = json.dumps({"entities": [], "relationships": []})
+    mock_chat_trace.return_value = json.dumps({"lineages": [], "paradigm_shifts": [], "current_frontier": []})
     query = _make_query(initiation_context="new research project")
     results = run_analysis(_make_corpus(), _make_evidence(), query, settings)
 
     assert "evidence_table" in results.active_lenses
     assert "gap_discovery" in results.active_lenses
+    assert "bias_detection" in results.active_lenses
+    assert "knowledge_graph" in results.active_lenses
+    assert "trace_ancestry" in results.active_lenses
     assert "research_planning" in results.active_lenses
-    # meta_analysis and venue_mapping should NOT be active for this query
-    assert "meta_analysis" not in results.active_lenses
-    assert "venue_mapping" not in results.active_lenses
+    assert "meta_analysis" in results.active_lenses
+    assert "venue_mapping" in results.active_lenses

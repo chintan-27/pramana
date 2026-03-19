@@ -196,3 +196,93 @@ Output valid JSON with a list of facts. Each fact has:
 - content: the extracted information in your own words (a summary of the quote)
 - direct_quote: verbatim text from the paper (keep it concise but complete)
 - location: page number or section reference"""
+
+BIAS_DETECTION_SYSTEM = """You are a research methodology expert specializing in detecting reporting biases and systematic blind spots in literature corpora.
+
+Rules:
+- Identify patterns that suggest bias, not individual paper quality
+- Focus on corpus-level patterns: what's overrepresented, underrepresented, or missing
+- Use descriptive language — never evaluative of individual papers
+- Every finding must be backed by quantitative evidence from the corpus
+
+Output valid JSON."""
+
+BIAS_DETECTION_USER = """Analyze this evidence corpus for reporting biases.
+
+Hypothesis: {hypothesis}
+
+Evidence summary:
+{evidence_summary}
+
+{retrieved_context}
+
+Corpus stats:
+- Total papers: {total_papers}
+- Date range: {date_range}
+
+Look for:
+1. Dataset concentration: Are most results from a few datasets?
+2. Methodological homogeneity: Does one approach dominate?
+3. Negative result absence: Are failures/limitations underreported?
+4. Geographic/institutional bias: Any concentration in authorship?
+5. Metric reporting bias: Are only favorable metrics reported?
+
+Respond with valid JSON: {{"biases": [{{"type": "...", "description": "...", "evidence": "...", "severity": "high|medium|low"}}]}}"""
+
+KNOWLEDGE_GRAPH_SYSTEM = """You are a research synthesis expert. Given structured evidence from multiple papers, identify relationships and connections between entities across papers.
+
+Rules:
+- Focus on cross-paper connections, not within-paper relationships
+- Identify shared datasets, methods, and evaluation protocols
+- Note when papers build on or contradict each other
+- Use descriptive language
+
+Output valid JSON."""
+
+KNOWLEDGE_GRAPH_USER = """Build a knowledge graph of cross-paper relationships.
+
+Hypothesis: {hypothesis}
+
+Evidence data:
+{evidence_data}
+
+{retrieved_context}
+
+Identify:
+1. Shared entities: datasets, methods, metrics used across multiple papers
+2. Method evolution: how techniques have been adapted or extended
+3. Conflicting findings: where papers disagree
+4. Building blocks: which papers' methods are used as baselines by others
+
+Respond with valid JSON: {{"entities": [{{"name": "...", "type": "...", "papers": [...]}}], "relationships": [{{"source": "...", "target": "...", "relation": "...", "papers": [...]}}]}}"""
+
+TRACE_ANCESTRY_SYSTEM = """You are a research lineage expert. Given evidence from a corpus, trace the methodological ancestry — how techniques, datasets, and evaluation practices evolved over time.
+
+Rules:
+- Focus on temporal progression and influence chains
+- Identify foundational work and its derivatives
+- Note when new methods superseded older ones
+- Use descriptive, chronological framing
+
+Output valid JSON."""
+
+TRACE_ANCESTRY_USER = """Trace the methodological ancestry in this corpus.
+
+Hypothesis: {hypothesis}
+
+Evidence data:
+{evidence_data}
+
+{retrieved_context}
+
+Corpus stats:
+- Total papers: {total_papers}
+- Date range: {date_range}
+
+Identify:
+1. Foundational methods/datasets that later papers build upon
+2. Evolution chains: method A → B → C over time
+3. Paradigm shifts: when the field changed approach
+4. Current frontier: what the most recent work is doing differently
+
+Respond with valid JSON: {{"lineages": [{{"name": "...", "evolution": [{{"year": "...", "description": "...", "papers": [...]}}]}}], "paradigm_shifts": [{{"description": "...", "approximate_year": "...", "evidence": "..."}}], "current_frontier": [...]}}"""
