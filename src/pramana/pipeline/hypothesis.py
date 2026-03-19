@@ -9,6 +9,15 @@ from pramana.llm.client import chat_json
 from pramana.llm.prompts import HYPOTHESIS_PARSING_SYSTEM, HYPOTHESIS_PARSING_USER
 
 
+class PICOComponents(BaseModel):
+    """PICO framework components extracted from a hypothesis."""
+
+    population: str = ""
+    intervention: str = ""
+    comparison: str = ""
+    outcome: str = ""
+
+
 class HypothesisQuery(BaseModel):
     """Structured output from hypothesis parsing."""
 
@@ -19,6 +28,7 @@ class HypothesisQuery(BaseModel):
     search_queries: list[str] = []
     time_range: tuple[int, int] | None = None
     initiation_context: str = ""
+    pico: PICOComponents = PICOComponents()
 
 
 def parse_hypothesis(
@@ -58,4 +68,39 @@ def parse_hypothesis(
     else:
         data["time_range"] = None
 
-    return HypothesisQuery(**data)
+    # Handle PICO components
+    pico_raw = data.pop("pico", {})
+    if isinstance(pico_raw, dict):
+        data["pico"] = PICOComponents(**pico_raw)
+    else:
+        data["pico"] = PICOComponents()
+
+    query = HypothesisQuery(**data)
+
+    # Generate additional search queries from PICO components
+    pico_queries = _pico_search_queries(query.pico)
+    if pico_queries:
+        existing = set(query.search_queries)
+        for q in pico_queries:
+            if q not in existing:
+                query.search_queries.append(q)
+
+    return query
+
+
+def _pico_search_queries(pico: PICOComponents) -> list[str]:
+    """Generate additional search queries from PICO components."""
+    queries: list[str] = []
+    parts = [
+        p for p in [pico.population, pico.intervention, pico.outcome]
+        if p
+    ]
+    if len(parts) >= 2:
+        queries.append(" ".join(parts))
+    if pico.intervention and pico.outcome:
+        queries.append(f"{pico.intervention} {pico.outcome}")
+    if pico.population and pico.intervention and pico.comparison:
+        queries.append(
+            f"{pico.population} {pico.intervention} vs {pico.comparison}"
+        )
+    return queries

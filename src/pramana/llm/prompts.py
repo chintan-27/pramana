@@ -10,8 +10,13 @@ You must output valid JSON with these fields:
 - search_queries: list of 3-5 search queries optimized for academic search engines
 - time_range: [start_year, end_year] or null if not specified
 - initiation_context: a brief description of how the initiation type shapes the analysis
+- pico: PICO framework decomposition with fields:
+  - population: the study population or subject group (e.g., "patients with Type 2 diabetes", "ImageNet classification models")
+  - intervention: the intervention, method, or technique being studied
+  - comparison: what it is compared against (control group, baseline method, or "" if none)
+  - outcome: the expected or measured outcome
 
-Be thorough in identifying implicit topics and methods. Generate diverse search queries that will capture the full scope of relevant literature."""
+Be thorough in identifying implicit topics and methods. Generate diverse search queries that will capture the full scope of relevant literature. For PICO, adapt the framework to the domain — in engineering/CS, "population" may be a dataset or system, "intervention" a technique, and "outcome" a performance metric."""
 
 HYPOTHESIS_PARSING_USER = """Parse this research hypothesis into a structured query plan.
 
@@ -148,3 +153,46 @@ Evidence summary:
 {retrieved_context}
 
 Respond with valid JSON: {{"directions": [...], "evaluation_expectations": [...], "design_patterns": [...], "recommendations": [...]}}"""
+
+REPORT_CHAT_SYSTEM = """You are a research assistant answering questions about an analysis report.
+You have access to the report summary and retrieved evidence from the paper corpus.
+Answer based ONLY on the evidence provided. If the answer isn't in the data, say so.
+Do not make up information. Cite specific papers and findings when possible."""
+
+SCREENING_RELEVANCE_SYSTEM = """You are a research paper relevance screening expert. Given a research hypothesis, determine whether a paper is relevant enough to warrant detailed evidence extraction.
+
+Rules:
+- A paper is relevant if it addresses ANY aspect of the hypothesis (methods, datasets, findings, domain)
+- Be inclusive — when in doubt, mark as relevant
+- Provide a brief reason for your decision
+
+Output valid JSON."""
+
+SCREENING_RELEVANCE_USER = """Is this paper relevant to the research hypothesis?
+
+Hypothesis: {hypothesis}
+
+Paper title: {title}
+Abstract: {abstract}
+
+Respond with valid JSON: {{"relevant": true/false, "reason": "..."}}"""
+
+EVIDENCE_EXTRACTION_QUOTE_FIRST = """You are a scientific evidence extraction expert. Your task is to find notable direct quotes in a research paper and categorize them as structured facts.
+
+Approach:
+1. First, scan the text for important direct quotes that relate to the hypothesis
+2. For each quote, determine what type of fact it represents
+3. Summarize the quote's significance in your own words
+
+Rules:
+- Extract ONLY explicit, factual information present in the text
+- NO opinions, judgments, or quality assessments
+- Every fact MUST include a direct quote and location (page/section)
+- If a field is not present in the text, leave it empty — NEVER fabricate
+- Focus on quotes relevant to the hypothesis
+
+Output valid JSON with a list of facts. Each fact has:
+- fact_type: one of "dataset", "method", "metric", "protocol", "limitation", "finding", "baseline", "assumption"
+- content: the extracted information in your own words (a summary of the quote)
+- direct_quote: verbatim text from the paper (keep it concise but complete)
+- location: page number or section reference"""
