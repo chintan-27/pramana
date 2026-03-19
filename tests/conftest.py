@@ -29,6 +29,8 @@ def settings(tmp_data_dir: Path) -> Settings:
         db_path=tmp_data_dir / "test.db",
         chroma_path=tmp_data_dir / "chroma",
         pdf_dir=tmp_data_dir / "pdfs",
+        ensemble_enabled=False,
+        screening_enabled=False,
     )
 
 

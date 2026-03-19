@@ -27,6 +27,7 @@ def _make_query(topics=None):
 @patch("pramana.pipeline.screening.search_papers")
 def test_screen_corpus_filters_irrelevant(mock_search, mock_chat, mock_client, mock_collection, settings):
     """Papers with high L2 distance are screened out by Gate 1."""
+    settings.screening_enabled = True
     papers = [
         {"title": "Relevant paper", "abstract": "Deep learning for X-ray", "db_id": 1},
         {"title": "Irrelevant paper", "abstract": "Cooking recipes", "db_id": 2},
@@ -58,6 +59,7 @@ def test_screen_corpus_filters_irrelevant(mock_search, mock_chat, mock_client, m
 @patch("pramana.pipeline.screening.search_papers")
 def test_screen_corpus_gate2_filters_by_llm(mock_search, mock_chat, mock_client, mock_collection, settings):
     """Gate 2 LLM check filters papers marked irrelevant."""
+    settings.screening_enabled = True
     papers = [
         {"title": "Paper A", "abstract": "Abstract A", "db_id": 1},
         {"title": "Paper B", "abstract": "Abstract B", "db_id": 2},
@@ -92,6 +94,7 @@ def test_screen_corpus_gate2_filters_by_llm(mock_search, mock_chat, mock_client,
 @patch("pramana.pipeline.screening.search_papers")
 def test_screen_corpus_gate1_fail_open(mock_search, mock_chat, mock_client, mock_collection, settings):
     """If ChromaDB fails, all papers pass through (fail-open)."""
+    settings.screening_enabled = True
     papers = [
         {"title": "Paper A", "abstract": "Abstract A", "db_id": 1},
     ]
@@ -114,6 +117,7 @@ def test_screen_corpus_gate1_fail_open(mock_search, mock_chat, mock_client, mock
 @patch("pramana.pipeline.screening.search_papers")
 def test_screen_corpus_gate2_fail_open(mock_search, mock_chat, mock_client, mock_collection, settings):
     """If LLM call fails in Gate 2, papers pass through (fail-open)."""
+    settings.screening_enabled = True
     papers = [
         {"title": "Paper A", "abstract": "Abstract A", "db_id": 1},
     ]

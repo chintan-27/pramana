@@ -85,3 +85,42 @@ def test_ensemble_extract_calls_twice(mock_extract, settings):
     result = ensemble_extract("text", "title", "hypothesis", settings)
     assert mock_extract.call_count == 2
     assert len(result) >= 1
+
+
+@patch("pramana.pipeline.extraction.extract_evidence_from_text")
+def test_ensemble_disabled_single_extractor(mock_ext, settings):
+    """When ensemble_enabled=False, extract_all_evidence uses single extractor."""
+    from pramana.pipeline.corpus import Corpus
+    from pramana.pipeline.hypothesis import HypothesisQuery
+
+    settings.ensemble_enabled = False
+    corpus = Corpus(papers=[
+        {"title": "Test", "abstract": "Some text", "db_id": None},
+    ])
+    query = HypothesisQuery(topics=["test"])
+
+    mock_ext.return_value = [_make_fact("F", "Quote")]
+    from pramana.pipeline.extraction import extract_all_evidence
+    result = extract_all_evidence(corpus, query, settings)
+    # Single extractor called once (not ensemble's twice)
+    assert mock_ext.call_count == 1
+
+
+@patch("pramana.pipeline.extraction.extract_evidence_from_text")
+def test_screened_out_papers_skipped(mock_ext, settings):
+    """Papers with screened_out=True are skipped in extract_all_evidence."""
+    from pramana.pipeline.corpus import Corpus
+    from pramana.pipeline.hypothesis import HypothesisQuery
+
+    settings.ensemble_enabled = False
+    corpus = Corpus(papers=[
+        {"title": "Included", "abstract": "Good paper", "db_id": None},
+        {"title": "Excluded", "abstract": "Filtered out", "db_id": None, "screened_out": True},
+    ])
+    query = HypothesisQuery(topics=["test"])
+
+    mock_ext.return_value = [_make_fact("F", "Quote")]
+    from pramana.pipeline.extraction import extract_all_evidence
+    result = extract_all_evidence(corpus, query, settings)
+    # Only called once (screened-out paper skipped)
+    assert mock_ext.call_count == 1
