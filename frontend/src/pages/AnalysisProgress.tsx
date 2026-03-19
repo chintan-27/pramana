@@ -1,14 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getAnalysisStatus, type RunStatus } from '../api/client';
+import { streamAnalysisProgress, type RunStatus } from '../api/client';
 
 const STAGES = [
-  { key: 'parsing', label: 'Parsing Hypothesis', detail: 'Extracting domains, topics, and search queries' },
-  { key: 'retrieval', label: 'Retrieving Papers', detail: 'Searching Semantic Scholar, arXiv, and PubMed' },
-  { key: 'extraction', label: 'Extracting Evidence', detail: 'Identifying facts, quotes, and locations' },
-  { key: 'normalization', label: 'Normalizing Evidence', detail: 'Canonicalizing terms and populating vectors' },
-  { key: 'analysis', label: 'Running Analysis', detail: 'Applying analytical lenses to evidence' },
-  { key: 'report', label: 'Generating Report', detail: 'Compiling findings and recommendations' },
+  { key: 'parsing', label: 'Parsing hypothesis', sub: 'Extracting domains, topics, search queries', icon: '01' },
+  { key: 'retrieval', label: 'Retrieving papers', sub: 'Semantic Scholar, arXiv, PubMed', icon: '02' },
+  { key: 'screening', label: 'Screening papers', sub: 'Filtering by relevance (embedding + LLM)', icon: '03' },
+  { key: 'extraction', label: 'Extracting evidence', sub: 'Facts, quotes, locations from each paper', icon: '04' },
+  { key: 'normalization', label: 'Normalizing', sub: 'Canonicalizing terms, building vectors', icon: '05' },
+  { key: 'analysis', label: 'Running lenses', sub: 'Applying analytical lenses to evidence', icon: '06' },
+  { key: 'report', label: 'Generating report', sub: 'Compiling findings and recommendations', icon: '07' },
 ];
 
 export default function AnalysisProgress() {
@@ -16,105 +17,157 @@ export default function AnalysisProgress() {
   const navigate = useNavigate();
   const [status, setStatus] = useState<RunStatus | null>(null);
   const [error, setError] = useState('');
+  const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     if (!runId) return;
 
-    const poll = async () => {
-      try {
-        const data = await getAnalysisStatus(runId);
+    const es = streamAnalysisProgress(
+      runId,
+      (data) => {
         setStatus(data);
-
         if (data.status === 'completed') {
+          es.close();
           navigate(`/report/${runId}`);
-          return;
         }
         if (data.status === 'failed') {
+          es.close();
           setError(data.error || 'Analysis failed');
-          return;
         }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to get status');
-        return;
-      }
-    };
+      },
+      () => {
+        setError('Lost connection to server');
+      },
+    );
+    esRef.current = es;
 
-    poll();
-    const interval = setInterval(poll, 2000);
-    return () => clearInterval(interval);
+    return () => es.close();
   }, [runId, navigate]);
 
-  const currentStageIndex = status ? STAGES.findIndex((s) => s.key === status.stage) : -1;
+  const currentIdx = status ? STAGES.findIndex((s) => s.key === status.stage) : -1;
+  const progress = (status?.progress || {}) as Record<string, unknown>;
 
   return (
-    <div className="max-w-lg mx-auto pt-8">
+    <div className="max-w-lg mx-auto pt-16 animate-fade-up">
       {/* Header */}
-      <div className="text-center mb-10">
-        <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-accent-subtle mb-4">
-          <svg className="w-6 h-6 text-accent animate-spin-slow" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5" opacity="0.2" />
-            <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-        </div>
-        <h1 className="text-2xl font-bold text-ink tracking-tight">Analysis in Progress</h1>
-        <p className="text-sm text-ink-muted mt-1">
-          Processing your research hypothesis
+      <div className="mb-12">
+        <p className="text-[11px] font-mono text-amber tracking-[0.2em] uppercase mb-3">
+          Processing
+        </p>
+        <h1 className="font-display text-3xl text-cream font-300 tracking-tight">
+          Analysis in progress
+        </h1>
+        <p className="text-sm text-cream-muted mt-2">
+          Streaming live updates from the pipeline.
         </p>
       </div>
 
       {/* Error */}
       {error && (
-        <div className="mb-8 p-4 bg-danger-subtle border border-danger/20 rounded-xl">
-          <p className="font-medium text-danger text-sm">Analysis Failed</p>
-          <p className="text-sm text-danger/80 mt-1">{error}</p>
+        <div className="mb-8 p-4 bg-rose-subtle border border-rose/20 rounded-lg">
+          <p className="font-medium text-rose text-sm">Analysis Failed</p>
+          <p className="text-sm text-rose/70 mt-1">{error}</p>
           <button
             onClick={() => navigate('/')}
-            className="mt-3 text-sm font-medium text-accent hover:text-accent-light transition-colors"
+            className="mt-3 text-sm font-medium text-amber hover:text-amber-glow transition-colors"
           >
-            Start New Analysis
+            Try again
           </button>
         </div>
       )}
 
-      {/* Pipeline visualization */}
-      <div className="space-y-0">
-        {STAGES.map((stage, index) => {
-          const isActive = index === currentStageIndex;
-          const isComplete = index < currentStageIndex;
-          const isPending = index > currentStageIndex;
+      {/* Live stats bar */}
+      {progress.papers_found != null && (
+        <div className="mb-8 grid grid-cols-3 gap-3">
+          <div className="bg-bg-card border border-line rounded-lg p-3 text-center">
+            <p className="text-lg font-display font-600 text-cream">{String(progress.papers_found)}</p>
+            <p className="text-[10px] text-cream-faint font-mono">papers found</p>
+          </div>
+          {progress.facts_extracted != null && (
+            <div className="bg-bg-card border border-line rounded-lg p-3 text-center">
+              <p className="text-lg font-display font-600 text-cream">{String(progress.facts_extracted)}</p>
+              <p className="text-[10px] text-cream-faint font-mono">facts extracted</p>
+            </div>
+          )}
+          {progress.lenses_completed != null && (
+            <div className="bg-bg-card border border-line rounded-lg p-3 text-center">
+              <p className="text-lg font-display font-600 text-cream">{(progress.lenses_completed as string[]).length}</p>
+              <p className="text-[10px] text-cream-faint font-mono">lenses done</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Pipeline stages */}
+      <div className="space-y-0 stagger">
+        {STAGES.map((stage, i) => {
+          const isActive = i === currentIdx;
+          const isDone = i < currentIdx;
+          const isPending = i > currentIdx;
 
           return (
-            <div key={stage.key} className={`pipeline-connector flex items-start gap-4 pb-6 ${isPending ? 'opacity-40' : ''}`}>
-              {/* Step indicator */}
-              <div className="flex-shrink-0 relative z-10">
-                {isComplete ? (
-                  <div className="w-10 h-10 rounded-xl bg-success flex items-center justify-center">
-                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div
+              key={stage.key}
+              className={`pipeline-connector flex items-start gap-4 pb-7 transition-opacity duration-300 ${isPending ? 'opacity-25' : ''}`}
+            >
+              {/* Indicator */}
+              <div className="shrink-0 relative z-10">
+                {isDone ? (
+                  <div className="w-11 h-11 rounded-lg bg-teal/15 border border-teal/30 flex items-center justify-center">
+                    <svg className="w-4 h-4 text-teal" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                     </svg>
                   </div>
                 ) : isActive ? (
-                  <div className="w-10 h-10 rounded-xl bg-accent-subtle border-2 border-accent flex items-center justify-center">
-                    <div className="w-2.5 h-2.5 bg-accent rounded-full animate-pulse" />
+                  <div className="w-11 h-11 rounded-lg bg-amber-subtle border border-amber/30 flex items-center justify-center">
+                    <div className="w-2 h-2 rounded-full bg-amber glow-dot" />
                   </div>
                 ) : (
-                  <div className="w-10 h-10 rounded-xl bg-surface-sunken border border-border flex items-center justify-center">
-                    <span className="text-sm font-mono text-ink-muted">{index + 1}</span>
+                  <div className="w-11 h-11 rounded-lg bg-bg-card border border-line flex items-center justify-center">
+                    <span className="text-xs font-mono text-cream-faint">{stage.icon}</span>
                   </div>
                 )}
               </div>
 
-              {/* Step content */}
-              <div className="pt-2 min-w-0">
-                <p className={`font-medium text-sm ${
-                  isActive ? 'text-accent' : isComplete ? 'text-ink' : 'text-ink-muted'
+              {/* Label */}
+              <div className="pt-2.5 min-w-0">
+                <p className={`text-sm font-medium ${
+                  isActive ? 'text-amber' : isDone ? 'text-cream' : 'text-cream-muted'
                 }`}>
                   {stage.label}
                 </p>
-                <p className="text-xs text-ink-muted mt-0.5">{stage.detail}</p>
-                {isActive && status?.progress && (
-                  <p className="text-xs text-accent font-medium mt-1.5">
-                    {status.progress.description as string || 'Processing…'}
+                <p className="text-[12px] text-cream-faint mt-0.5">{stage.sub}</p>
+                {isActive && !!progress.description && (
+                  <p className="text-[12px] text-amber/80 font-mono mt-1.5">
+                    {String(progress.description)}
+                  </p>
+                )}
+                {/* Stage-specific live stats */}
+                {isDone && stage.key === 'retrieval' && !!progress.sources && (
+                  <p className="text-[11px] text-cream-faint font-mono mt-1">
+                    S2: {(progress.sources as Record<string, number>).s2} &middot;
+                    arXiv: {(progress.sources as Record<string, number>).arxiv} &middot;
+                    PubMed: {(progress.sources as Record<string, number>).pubmed}
+                  </p>
+                )}
+                {isDone && stage.key === 'screening' && progress.papers_passed != null && (
+                  <p className="text-[11px] text-cream-faint font-mono mt-1">
+                    {String(progress.papers_passed)} passed &middot; {String(progress.papers_screened_out ?? 0)} filtered
+                  </p>
+                )}
+                {isDone && stage.key === 'extraction' && progress.facts_extracted != null && (
+                  <p className="text-[11px] text-cream-faint font-mono mt-1">
+                    {String(progress.facts_extracted)} facts from {String(progress.papers_processed ?? '?')} papers
+                  </p>
+                )}
+                {isDone && stage.key === 'normalization' && progress.mappings != null && (
+                  <p className="text-[11px] text-cream-faint font-mono mt-1">
+                    {String(progress.mappings)} mappings &middot; {String(progress.categories)} categories
+                  </p>
+                )}
+                {isDone && stage.key === 'analysis' && !!progress.lenses_completed && (
+                  <p className="text-[11px] text-cream-faint font-mono mt-1">
+                    {(progress.lenses_completed as string[]).join(', ')}
                   </p>
                 )}
               </div>
@@ -124,9 +177,8 @@ export default function AnalysisProgress() {
       </div>
 
       {/* Run ID */}
-      <div className="mt-6 text-center">
-        <span className="inline-flex items-center gap-1.5 text-[11px] text-ink-muted font-mono bg-surface-sunken px-3 py-1.5 rounded-lg">
-          <span className="opacity-50">Run</span>
+      <div className="mt-8 text-center">
+        <span className="text-[10px] font-mono text-cream-faint bg-bg-card px-3 py-1.5 rounded border border-line">
           {runId}
         </span>
       </div>
