@@ -24,8 +24,7 @@ class VenueMappingLens(Lens):
     title = "Venue & Domain Mapping"
 
     def should_activate(self, query: HypothesisQuery) -> bool:
-        all_text = " ".join(query.topics + query.domains + query.evaluation_focus).lower()
-        return any(kw in all_text for kw in ACTIVATION_KEYWORDS)
+        return True  # Venue context is always useful
 
     def analyze(
         self,

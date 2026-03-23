@@ -1,37 +1,40 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { startAnalysis } from '../api/client';
+import { startAnalysis, uploadPdf, type PdfUploadResult } from '../api/client';
 
-const INITIATION_TYPES = [
-  { value: 'new', label: 'New Project', desc: 'Starting fresh research', icon: '✦' },
-  { value: 'related', label: 'Related Work', desc: 'Exploring adjacent work', icon: '↗' },
-  { value: 'continuation', label: 'Continuation', desc: 'Continuing prior research', icon: '→' },
-  { value: 'joining', label: 'RA Joining', desc: 'Joining existing project', icon: '⊕' },
+const TYPES = [
+  { value: 'new', label: 'New Research', desc: 'Starting a fresh investigation' },
+  { value: 'related', label: 'Related Work', desc: 'Exploring adjacent literature' },
+  { value: 'continuation', label: 'Continuation', desc: 'Extending prior research' },
+  { value: 'joining', label: 'Joining Team', desc: 'Onboarding to existing project' },
 ];
 
 export default function HypothesisInput() {
   const navigate = useNavigate();
   const [hypothesis, setHypothesis] = useState('');
-  const [initiationType, setInitiationType] = useState('new');
+  const [type, setType] = useState('new');
   const [maxPapers, setMaxPapers] = useState(50);
   const [priorResearch, setPriorResearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [uploadedPdfs, setUploadedPdfs] = useState<PdfUploadResult[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const showPriorResearch = initiationType === 'related' || initiationType === 'continuation';
+  const showPrior = type === 'related' || type === 'continuation';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hypothesis.trim()) return;
-
     setLoading(true);
     setError('');
     try {
       const result = await startAnalysis({
         hypothesis: hypothesis.trim(),
-        initiation_type: initiationType,
+        initiation_type: type,
         max_papers: maxPapers,
         prior_research: priorResearch.trim() || undefined,
+        pdf_file_ids: uploadedPdfs.length > 0 ? uploadedPdfs.map((p) => p.file_id) : undefined,
       });
       navigate(`/analysis/${result.run_id}`);
     } catch (err) {
@@ -41,137 +44,206 @@ export default function HypothesisInput() {
     }
   };
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files?.length) return;
+    setUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        const result = await uploadPdf(file);
+        setUploadedPdfs((prev) => [...prev, result]);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const removePdf = (fileId: string) => {
+    setUploadedPdfs((prev) => prev.filter((p) => p.file_id !== fileId));
+  };
+
   return (
-    <div className="max-w-2xl mx-auto pt-8 sm:pt-16">
+    <div className="max-w-xl mx-auto pt-12 sm:pt-20 animate-fade-up">
       {/* Hero */}
-      <div className="text-center mb-10">
-        <h1 className="text-4xl sm:text-5xl font-bold text-ink tracking-tight leading-tight">
-          Analyze scientific
+      <div className="mb-12">
+        <p className="text-[11px] font-mono text-amber tracking-[0.2em] uppercase mb-4">
+          Research Assistant
+        </p>
+        <h1 className="font-display text-[40px] sm:text-[52px] font-300 text-cream leading-[1.1] tracking-tight">
+          What would you
           <br />
-          <span className="text-accent">literature</span>
+          like to <em className="font-400 text-amber">investigate</em>?
         </h1>
-        <p className="mt-4 text-ink-muted text-lg max-w-md mx-auto leading-relaxed">
-          Enter a research hypothesis. Pramana gathers papers, extracts evidence,
-          and synthesizes findings through composable analytical lenses.
+        <p className="mt-5 text-cream-muted text-[15px] leading-relaxed max-w-md">
+          Pramana is a hypothesis-driven research assistant that gathers papers,
+          extracts structured evidence with direct quotes, and synthesizes
+          findings through composable analytical lenses.
         </p>
       </div>
 
-      {/* Form */}
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Hypothesis textarea */}
-        <div className="relative">
-          <label htmlFor="hypothesis" className="block text-sm font-medium text-ink mb-2">
-            Research Hypothesis
+      <form onSubmit={handleSubmit} className="space-y-7">
+        {/* Hypothesis input */}
+        <div>
+          <label className="text-[11px] font-mono text-cream-muted tracking-widest uppercase mb-2 block">
+            Hypothesis
           </label>
           <textarea
-            id="hypothesis"
             value={hypothesis}
             onChange={(e) => setHypothesis(e.target.value)}
             placeholder="e.g., External validation is underreported in deep learning studies for medical imaging diagnostics"
-            className="w-full h-36 p-4 bg-surface-raised border border-border rounded-xl text-ink placeholder:text-ink-muted/50 resize-none focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all text-[15px] leading-relaxed"
+            className="w-full h-32 p-4 bg-bg-card border border-line rounded-lg text-cream text-[15px] leading-relaxed placeholder:text-cream-faint/60 resize-none focus:outline-none focus:border-amber/40 focus:ring-1 focus:ring-amber/20 transition-all"
             required
           />
-          <span className="absolute bottom-3 right-3 text-[11px] text-ink-muted/40 font-mono">
-            {hypothesis.length > 0 ? `${hypothesis.length} chars` : ''}
-          </span>
+          {hypothesis.length > 0 && (
+            <span className="block text-right text-[10px] font-mono text-cream-faint mt-1">
+              {hypothesis.length}
+            </span>
+          )}
         </div>
 
-        {/* Initiation type */}
+        {/* Research context */}
         <div>
-          <label className="block text-sm font-medium text-ink mb-2">
-            Research Context
+          <label className="text-[11px] font-mono text-cream-muted tracking-widest uppercase mb-3 block">
+            Context
           </label>
-          <div className="grid grid-cols-2 gap-2.5">
-            {INITIATION_TYPES.map((type) => (
+          <div className="grid grid-cols-2 gap-2">
+            {TYPES.map((t) => (
               <button
-                key={type.value}
+                key={t.value}
                 type="button"
-                onClick={() => setInitiationType(type.value)}
-                className={`p-3 text-left rounded-xl border transition-all ${
-                  initiationType === type.value
-                    ? 'border-accent bg-accent-subtle ring-1 ring-accent/20'
-                    : 'border-border bg-surface-raised hover:border-border-strong'
+                onClick={() => setType(t.value)}
+                className={`p-3 text-left rounded-lg border transition-all duration-150 ${
+                  type === t.value
+                    ? 'border-amber/40 bg-amber-subtle'
+                    : 'border-line bg-bg-card hover:border-line-strong'
                 }`}
               >
-                <div className="flex items-center gap-2">
-                  <span className={`text-sm ${
-                    initiationType === type.value ? 'text-accent' : 'text-ink-muted'
-                  }`}>
-                    {type.icon}
-                  </span>
-                  <span className={`font-medium text-sm ${
-                    initiationType === type.value ? 'text-accent' : 'text-ink'
-                  }`}>
-                    {type.label}
-                  </span>
-                </div>
-                <p className="text-xs text-ink-muted mt-1 ml-6">{type.desc}</p>
+                <span className={`block text-sm font-medium ${
+                  type === t.value ? 'text-amber' : 'text-cream'
+                }`}>
+                  {t.label}
+                </span>
+                <span className="block text-[12px] text-cream-muted mt-0.5">{t.desc}</span>
               </button>
             ))}
           </div>
         </div>
 
-        {/* Prior research context */}
-        {showPriorResearch && (
-          <div className="relative">
-            <label htmlFor="priorResearch" className="block text-sm font-medium text-ink mb-1">
-              Your Existing Research
-              <span className="text-ink-muted font-normal ml-1">(optional)</span>
+        {/* Prior research — conditional */}
+        {showPrior && (
+          <div className="animate-fade-up">
+            <label className="text-[11px] font-mono text-cream-muted tracking-widest uppercase mb-1 block">
+              Your Prior Work <span className="text-cream-faint normal-case tracking-normal">(optional)</span>
             </label>
-            <p className="text-xs text-ink-muted mb-2">
-              Paste your abstract, key findings, or a summary of your prior work.
-              This helps us find more relevant papers and tailor the analysis.
+            <p className="text-[12px] text-cream-faint mb-2">
+              Paste your abstract or key findings to help us find more relevant literature.
             </p>
             <textarea
-              id="priorResearch"
               value={priorResearch}
               onChange={(e) => setPriorResearch(e.target.value)}
               placeholder={
-                initiationType === 'related'
-                  ? 'e.g., Our recent paper showed that transformer models outperform CNNs for retinal image classification with AUC 0.94 on the DRIVE dataset...'
-                  : 'e.g., In our Phase 1 study we established a baseline using ResNet-50 on ADNI data achieving 89% accuracy for AD vs CN classification...'
+                type === 'related'
+                  ? 'Our recent paper showed that transformer models outperform CNNs for retinal image classification...'
+                  : 'In our Phase 1 study we established a baseline using ResNet-50 on ADNI data...'
               }
-              className="w-full h-28 p-4 bg-surface-raised border border-border rounded-xl text-ink placeholder:text-ink-muted/40 resize-none focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all text-sm leading-relaxed"
+              className="w-full h-24 p-4 bg-bg-card border border-line rounded-lg text-cream text-sm leading-relaxed placeholder:text-cream-faint/50 resize-none focus:outline-none focus:border-amber/40 focus:ring-1 focus:ring-amber/20 transition-all"
             />
-            <span className="absolute bottom-3 right-3 text-[11px] text-ink-muted/40 font-mono">
-              {priorResearch.length > 0 ? `${priorResearch.length} chars` : ''}
-            </span>
+
+            {/* PDF Upload */}
+            <div className="mt-4">
+              <label className="text-[11px] font-mono text-cream-muted tracking-widest uppercase mb-2 block">
+                Upload Papers <span className="text-cream-faint normal-case tracking-normal">(optional)</span>
+              </label>
+              <p className="text-[12px] text-cream-faint mb-2">
+                Upload your previous papers as PDF to include as context.
+              </p>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf"
+                multiple
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="w-full py-3 border-2 border-dashed border-line rounded-lg text-sm text-cream-muted hover:border-amber/40 hover:text-cream transition-all disabled:opacity-50"
+              >
+                {uploading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="animate-spin-slow w-4 h-4" viewBox="0 0 24 24" fill="none">
+                      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2.5" opacity="0.3" />
+                      <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                    </svg>
+                    Extracting text...
+                  </span>
+                ) : (
+                  'Drop PDFs here or click to upload'
+                )}
+              </button>
+
+              {uploadedPdfs.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  {uploadedPdfs.map((pdf) => (
+                    <div
+                      key={pdf.file_id}
+                      className="flex items-center justify-between p-2.5 bg-bg-card border border-line rounded-lg"
+                    >
+                      <div className="min-w-0">
+                        <p className="text-sm text-cream truncate">{pdf.filename}</p>
+                        <p className="text-[11px] text-cream-faint font-mono">
+                          {pdf.page_count} pages &middot; {Math.round(pdf.char_count / 1000)}k chars
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removePdf(pdf.file_id)}
+                        className="shrink-0 ml-2 p-1 text-cream-faint hover:text-rose transition-colors"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
-        {/* Max papers slider */}
+        {/* Corpus size */}
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label htmlFor="maxPapers" className="text-sm font-medium text-ink">
+            <label className="text-[11px] font-mono text-cream-muted tracking-widest uppercase">
               Corpus Size
             </label>
-            <span className="text-sm font-mono text-accent font-medium">{maxPapers} papers</span>
+            <span className="text-sm font-mono text-amber font-medium">{maxPapers}</span>
           </div>
           <input
-            id="maxPapers"
             type="range"
             min="10"
             max="200"
             step="10"
             value={maxPapers}
             onChange={(e) => setMaxPapers(Number(e.target.value))}
-            className="w-full h-1.5 bg-border rounded-full appearance-none cursor-pointer accent-accent"
+            className="w-full h-1 bg-line-strong rounded-full appearance-none cursor-pointer accent-amber"
           />
-          <div className="flex justify-between text-[11px] text-ink-muted mt-1">
-            <span>10</span>
-            <span>Quick scan</span>
-            <span>Thorough</span>
-            <span>200</span>
+          <div className="flex justify-between text-[10px] font-mono text-cream-faint mt-1.5">
+            <span>10 quick</span>
+            <span>200 thorough</span>
           </div>
         </div>
 
         {/* Error */}
         {error && (
-          <div className="flex items-start gap-2.5 p-3.5 bg-danger-subtle border border-danger/20 rounded-xl text-danger text-sm">
-            <svg className="w-4 h-4 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <circle cx="12" cy="12" r="10" strokeWidth="1.5" />
-              <path strokeLinecap="round" strokeWidth="1.5" d="M12 8v4m0 4h.01" />
-            </svg>
+          <div className="p-3.5 bg-rose-subtle border border-rose/20 rounded-lg text-rose text-sm">
             {error}
           </div>
         )}
@@ -180,7 +252,7 @@ export default function HypothesisInput() {
         <button
           type="submit"
           disabled={loading || !hypothesis.trim()}
-          className="w-full py-3.5 bg-accent text-white rounded-xl font-medium hover:bg-accent-light disabled:opacity-40 disabled:cursor-not-allowed transition-all text-[15px] shadow-sm shadow-accent/20 hover:shadow-md hover:shadow-accent/20"
+          className="w-full py-3.5 bg-amber text-bg-card rounded-lg font-semibold text-[15px] hover:bg-amber-glow disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 tracking-wide"
         >
           {loading ? (
             <span className="flex items-center justify-center gap-2">
@@ -188,26 +260,114 @@ export default function HypothesisInput() {
                 <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2.5" opacity="0.3" />
                 <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
               </svg>
-              Starting analysis…
+              Starting...
             </span>
           ) : (
-            'Analyze Literature'
+            'Begin Analysis'
           )}
         </button>
       </form>
 
-      {/* Features */}
-      <div className="mt-16 grid grid-cols-3 gap-6 text-center">
-        {[
-          { label: 'Evidence Extraction', detail: 'Direct quotes with source locations' },
-          { label: 'Gap Discovery', detail: 'Identify blind spots in the corpus' },
-          { label: 'Research Planning', detail: 'Grounded direction suggestions' },
-        ].map((f) => (
-          <div key={f.label}>
-            <p className="text-sm font-medium text-ink">{f.label}</p>
-            <p className="text-xs text-ink-muted mt-1">{f.detail}</p>
-          </div>
-        ))}
+      {/* ── How It Works ── */}
+      <div className="mt-20 pt-8 border-t border-line">
+        <p className="text-[11px] font-mono text-amber tracking-[0.2em] uppercase mb-6">
+          How It Works
+        </p>
+        <div className="space-y-5">
+          {[
+            { n: '01', title: 'Parse', body: 'Your hypothesis is analyzed to extract domains, topics, and targeted search queries.' },
+            { n: '02', title: 'Gather', body: 'Papers are retrieved from Semantic Scholar, arXiv, and PubMed. Blogs provide additional discovery context.' },
+            { n: '03', title: 'Extract', body: 'Structured evidence is pulled from each paper — facts, methods, datasets, and limitations — each tied to a direct quote with page or section location.' },
+            { n: '04', title: 'Normalize', body: 'Datasets, metrics, and terms are canonicalized. Semantic vectors are built for cross-paper search.' },
+            { n: '05', title: 'Analyze', body: 'Composable analytical lenses examine the evidence: tables, gap discovery, meta-analysis, venue mapping, and research planning.' },
+            { n: '06', title: 'Report', body: 'Findings are synthesized into a structured report with charts, identified gaps, key concepts, and suggested research directions.' },
+          ].map((s) => (
+            <div key={s.n} className="flex gap-4">
+              <span className="text-[10px] font-mono text-amber tracking-widest mt-1.5 shrink-0 w-5">{s.n}</span>
+              <div>
+                <p className="font-display text-[17px] text-cream">{s.title}</p>
+                <p className="text-[13px] text-cream-muted mt-0.5 leading-relaxed">{s.body}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── What Makes It Different ── */}
+      <div className="mt-16 pt-8 border-t border-line">
+        <p className="text-[11px] font-mono text-amber tracking-[0.2em] uppercase mb-6">
+          Design Principles
+        </p>
+        <div className="grid grid-cols-2 gap-x-8 gap-y-6">
+          {[
+            {
+              title: 'Evidence-Grounded',
+              body: 'Every factual output is traceable to source text — a direct quote with a page or section reference. Nothing is inferred or fabricated.',
+            },
+            {
+              title: 'Assistant-First',
+              body: 'Outputs support human reasoning, not automated decisions. Pramana helps you think, it doesn\u2019t think for you.',
+            },
+            {
+              title: 'No Judgments',
+              body: 'Language is descriptive and assistive, never evaluative. Papers are not ranked, scored, or judged for quality.',
+            },
+            {
+              title: 'Hypothesis-Conditioned',
+              body: 'Behavior adapts based on your hypothesis and research context — new exploration, continuation, related work, or onboarding.',
+            },
+          ].map((p) => (
+            <div key={p.title}>
+              <p className="text-sm font-semibold text-cream">{p.title}</p>
+              <p className="text-[13px] text-cream-muted mt-1 leading-relaxed">{p.body}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Analytical Lenses ── */}
+      <div className="mt-16 pt-8 border-t border-line">
+        <p className="text-[11px] font-mono text-amber tracking-[0.2em] uppercase mb-2">
+          Analytical Lenses
+        </p>
+        <p className="text-sm text-cream-muted mb-5">
+          Modular analyses are selected based on your hypothesis and intent:
+        </p>
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { title: 'Evidence Table', desc: 'Structured facts organized by type with source tracing' },
+            { title: 'Gap Discovery', desc: 'Identifies where evidence is missing or thin' },
+            { title: 'Meta-Analysis', desc: 'Year distributions, term frequencies, concentration patterns' },
+            { title: 'Venue Mapping', desc: 'Where research gets published and venue-specific patterns' },
+            { title: 'Research Planning', desc: 'Suggested directions and practical recommendations' },
+          ].map((l) => (
+            <div key={l.title} className="p-3 bg-bg-card border border-line rounded-lg">
+              <p className="text-sm font-medium text-cream">{l.title}</p>
+              <p className="text-[12px] text-cream-muted mt-1 leading-relaxed">{l.desc}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Sources ── */}
+      <div className="mt-16 pt-8 border-t border-line mb-8">
+        <p className="text-[11px] font-mono text-amber tracking-[0.2em] uppercase mb-5">
+          Sources
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {['Semantic Scholar', 'arXiv', 'PubMed', 'Blogs (discovery only)'].map((src) => (
+            <span
+              key={src}
+              className="px-3 py-1.5 text-sm text-cream-dim border border-line rounded-lg bg-bg-card"
+            >
+              {src}
+            </span>
+          ))}
+        </div>
+        <p className="text-[12px] text-cream-faint mt-3 leading-relaxed">
+          Blogs are used for discovery and context but are not treated as primary evidence.
+          Initial domain focus: Biomedical Engineering &amp; Biomedical ML.
+        </p>
       </div>
     </div>
   );

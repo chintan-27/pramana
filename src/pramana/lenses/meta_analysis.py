@@ -24,8 +24,7 @@ class MetaAnalysisLens(Lens):
     title = "Meta-Analysis"
 
     def should_activate(self, query: HypothesisQuery) -> bool:
-        all_text = " ".join(query.topics + query.evaluation_focus).lower()
-        return any(kw in all_text for kw in ACTIVATION_KEYWORDS)
+        return True  # Year/venue/term distributions are always useful
 
     def analyze(
         self,

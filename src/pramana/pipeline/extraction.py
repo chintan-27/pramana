@@ -113,7 +113,9 @@ def extract_all_evidence(
             facts = extract_evidence_from_text(text, title, hypothesis_text, settings)
 
         # Apply confidence scoring
-        from pramana.pipeline.confidence import compute_confidence, score_quote_quality
+        from pramana.pipeline.confidence import compute_confidence, score_quote_quality, venue_tier_boost
+        paper_venue = (paper.get("venue") or "")
+        v_boost = venue_tier_boost(paper_venue, settings)
         for fact in facts:
             quote_quality = score_quote_quality(
                 direct_quote=fact.direct_quote,
@@ -123,7 +125,7 @@ def extract_all_evidence(
             )
             # fact.confidence already set by ensemble (agreement), or 0.0 if single
             agreement = fact.confidence if settings.ensemble_enabled else None
-            fact.confidence = compute_confidence(quote_quality, agreement)
+            fact.confidence = compute_confidence(quote_quality, agreement, v_boost)
 
         logger.debug("Paper '%s': extracted %d facts", title[:50], len(facts))
 

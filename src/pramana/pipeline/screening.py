@@ -116,8 +116,8 @@ def _gate2_llm_relevance(
         if paper.get("screened_out"):
             continue
 
-        title = paper.get("title", "")
-        abstract = paper.get("abstract", "")[:500]
+        title = paper.get("title") or ""
+        abstract = (paper.get("abstract") or "")[:500]
 
         if not title and not abstract:
             continue

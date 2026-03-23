@@ -33,6 +33,15 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 
+    # Screening settings
+    screening_enabled: bool = True
+    screening_similarity_threshold: float = 1.5  # L2 distance cutoff
+    screening_model: str = ""  # empty = use llm_model
+
+    # Ensemble extraction settings
+    ensemble_enabled: bool = True
+    ensemble_models: list[str] = []  # empty = use llm_model for all
+
     def ensure_dirs(self) -> None:
         """Create data directories if they don't exist."""
         self.data_dir.mkdir(parents=True, exist_ok=True)
