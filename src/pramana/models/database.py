@@ -44,20 +44,20 @@ def get_session(settings: Settings | None = None):
 
 
 def seed_venues(settings: Settings) -> None:
-    """Seed the venue database from venue_data/bme_venues.json."""
+    """Seed the venue database from all venue_data/*.json files."""
     import json
 
-    venue_file = Path("venue_data/bme_venues.json")
-    if not venue_file.exists():
+    venue_dir = Path("venue_data")
+    if not venue_dir.exists():
         return
-
-    with open(venue_file) as f:
-        venues_data = json.load(f)
 
     from pramana.models.schema import Venue
 
     with get_session(settings) as session:
-        for v in venues_data:
-            existing = session.query(Venue).filter_by(name=v["name"]).first()
-            if not existing:
-                session.add(Venue(**v))
+        for venue_file in sorted(venue_dir.glob("*.json")):
+            with open(venue_file) as f:
+                venues_data = json.load(f)
+            for v in venues_data:
+                existing = session.query(Venue).filter_by(name=v["name"]).first()
+                if not existing:
+                    session.add(Venue(**v))

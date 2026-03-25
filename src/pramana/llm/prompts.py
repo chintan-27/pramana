@@ -3,7 +3,7 @@
 HYPOTHESIS_PARSING_SYSTEM = """You are a research methodology expert. Your task is to parse a research hypothesis into a structured query plan for literature analysis.
 
 You must output valid JSON with these fields:
-- domains: list of scientific domains (e.g., ["biomedical engineering", "machine learning"])
+- domains: list of scientific domains (e.g., ["machine learning", "psychology", "economics"])
 - topics: list of specific research topics
 - methods: list of methods or techniques mentioned or implied
 - evaluation_focus: list of evaluation-related aspects (metrics, validation, robustness, etc.)
@@ -11,12 +11,12 @@ You must output valid JSON with these fields:
 - time_range: [start_year, end_year] or null if not specified
 - initiation_context: a brief description of how the initiation type shapes the analysis
 - pico: PICO framework decomposition with fields:
-  - population: the study population or subject group (e.g., "patients with Type 2 diabetes", "ImageNet classification models")
-  - intervention: the intervention, method, or technique being studied
-  - comparison: what it is compared against (control group, baseline method, or "" if none)
+  - population: the study population or subject group (adapt to domain — may be patients, participants, datasets, systems, firms, etc.)
+  - intervention: the intervention, method, treatment, or technique being studied
+  - comparison: what it is compared against (control group, baseline, or "" if none)
   - outcome: the expected or measured outcome
 
-Be thorough in identifying implicit topics and methods. Generate diverse search queries that will capture the full scope of relevant literature. For PICO, adapt the framework to the domain — in engineering/CS, "population" may be a dataset or system, "intervention" a technique, and "outcome" a performance metric."""
+Be thorough in identifying implicit topics and methods. Generate diverse search queries that will capture the full scope of relevant literature. For PICO, adapt the framework to the domain — the framework works across medicine, social science, CS, economics, and other fields."""
 
 HYPOTHESIS_PARSING_USER = """Parse this research hypothesis into a structured query plan.
 

@@ -14,7 +14,7 @@ from pramana.models.vectors import (
     get_paper_collection,
 )
 from pramana.pipeline.hypothesis import HypothesisQuery
-from pramana.sources import arxiv, pubmed, semantic_scholar
+from pramana.sources import arxiv, crossref, pubmed, semantic_scholar
 from pramana.sources.pdf import download_pdf, extract_text
 
 logger = logging.getLogger(__name__)
@@ -27,6 +27,7 @@ class Corpus(BaseModel):
     total_from_s2: int = 0
     total_from_arxiv: int = 0
     total_from_pubmed: int = 0
+    total_from_crossref: int = 0
 
 
 def build_corpus(
@@ -36,7 +37,7 @@ def build_corpus(
 ) -> Corpus:
     """Build a corpus of papers from all sources based on the hypothesis query."""
     all_papers: list[dict] = []
-    per_source = max(max_papers // 3, 10)
+    per_source = max(max_papers // 4, 10)
 
     corpus = Corpus()
 
@@ -69,6 +70,14 @@ def build_corpus(
             all_papers.extend(pm_papers)
         except Exception as e:
             logger.warning(f"PubMed search failed: {e}")
+
+        # CrossRef
+        try:
+            cr_papers = crossref.search_papers(search_query, max_results=per_source)
+            corpus.total_from_crossref += len(cr_papers)
+            all_papers.extend(cr_papers)
+        except Exception as e:
+            logger.warning(f"CrossRef search failed: {e}")
 
     logger.info("Raw papers collected: %d (before dedup)", len(all_papers))
 

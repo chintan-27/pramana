@@ -89,7 +89,16 @@ def analyze(
         progress.update(task, description=f"[green]Retrieved {paper_count} papers[/green]")
         progress.remove_task(task)
 
-        # Phase 3: Extract evidence
+        # Phase 3: Screen papers
+        task = progress.add_task("Screening papers...", total=None)
+        from pramana.pipeline.screening import screen_corpus
+        corpus = screen_corpus(corpus, parsed, settings)
+        screened = sum(1 for p in corpus.papers if p.get("screened_out"))
+        passed = paper_count - screened
+        progress.update(task, description=f"[green]{passed} papers passed screening[/green]")
+        progress.remove_task(task)
+
+        # Phase 4: Extract evidence
         task = progress.add_task("Extracting evidence...", total=None)
         from pramana.pipeline.extraction import extract_all_evidence
         evidence = extract_all_evidence(corpus, parsed, settings)
@@ -99,21 +108,21 @@ def analyze(
         )
         progress.remove_task(task)
 
-        # Phase 4: Normalize
+        # Phase 5: Normalize
         task = progress.add_task("Normalizing evidence...", total=None)
         from pramana.pipeline.normalization import normalize_evidence
         normalized = normalize_evidence(evidence, settings)
         progress.update(task, description="[green]Evidence normalized[/green]")
         progress.remove_task(task)
 
-        # Phase 5: Run lenses via orchestrator
+        # Phase 6: Run lenses via orchestrator
         task = progress.add_task("Running analysis...", total=None)
         from pramana.pipeline.orchestrator import run_analysis
         results = run_analysis(corpus, normalized, parsed, settings)
         progress.update(task, description="[green]Analysis complete[/green]")
         progress.remove_task(task)
 
-        # Phase 6: Generate report
+        # Phase 7: Generate report
         task = progress.add_task("Generating report...", total=None)
         from pramana.report.generator import generate_report
         report = generate_report(results, parsed, output_format, settings)

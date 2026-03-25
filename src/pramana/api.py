@@ -90,6 +90,7 @@ class AnalyzeRequest(BaseModel):
     max_papers: int = 50
     prior_research: str = ""
     pdf_file_ids: list[str] = []
+    domain: str = ""  # User-declared domain (e.g. "Computer Science", "Economics")
 
 
 class AnalyzeResponse(BaseModel):
@@ -248,6 +249,7 @@ async def start_analysis(request: AnalyzeRequest, background_tasks: BackgroundTa
         "initiation_type": request.initiation_type,
         "max_papers": request.max_papers,
         "prior_research": request.prior_research,
+        "domain": request.domain,
         "progress": {},
         "result": None,
         "error": None,
@@ -578,6 +580,129 @@ async def get_feedback(fact_id: int):
         ]
 
 
+@app.get("/api/reports/{run_id}/export")
+async def export_report(run_id: int, format: str = "bibtex"):
+    """Export report data in BibTeX, CSV, or Markdown format."""
+    import csv
+    import io
+
+    settings = get_settings()
+    with get_session(settings) as session:
+        run = session.get(AnalysisRun, run_id)
+        if not run:
+            raise HTTPException(404, "Report not found")
+
+        # Get all papers associated with this run via extracted facts
+        papers = (
+            session.query(Paper)
+            .join(ExtractedFactDB, ExtractedFactDB.paper_id == Paper.id)
+            .filter(
+                ExtractedFactDB.paper_id.in_(
+                    session.query(ExtractedFactDB.paper_id)
+                    .filter(ExtractedFactDB.paper_id == Paper.id)
+                )
+            )
+            .distinct()
+            .all()
+        )
+
+        if format == "bibtex":
+            lines = []
+            for p in papers:
+                authors_list = json.loads(p.authors) if p.authors else []
+                authors_str = " and ".join(authors_list) if authors_list else "Unknown"
+                key = _bibtex_key(authors_list, p.year, p.title)
+                entry_type = "article"
+                lines.append(f"@{entry_type}{{{key},")
+                lines.append(f"  title = {{{p.title}}},")
+                lines.append(f"  author = {{{authors_str}}},")
+                if p.year:
+                    lines.append(f"  year = {{{p.year}}},")
+                if p.venue:
+                    lines.append(f"  journal = {{{p.venue}}},")
+                if p.doi:
+                    lines.append(f"  doi = {{{p.doi}}},")
+                if p.url:
+                    lines.append(f"  url = {{{p.url}}},")
+                lines.append("}")
+                lines.append("")
+            content = "\n".join(lines)
+            from starlette.responses import Response
+            return Response(
+                content=content,
+                media_type="text/plain",
+                headers={"Content-Disposition": f"attachment; filename=pramana_{run_id}.bib"},
+            )
+
+        elif format == "csv":
+            facts = (
+                session.query(ExtractedFactDB, Paper.title)
+                .join(Paper, ExtractedFactDB.paper_id == Paper.id)
+                .all()
+            )
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            writer.writerow(["paper_title", "fact_type", "content", "direct_quote",
+                              "location", "confidence"])
+            for fact, paper_title in facts:
+                writer.writerow([
+                    paper_title,
+                    fact.fact_type,
+                    fact.content,
+                    fact.direct_quote,
+                    fact.location,
+                    round(fact.confidence or 0.0, 3),
+                ])
+            from starlette.responses import Response
+            return Response(
+                content=buf.getvalue(),
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename=pramana_{run_id}_facts.csv"},
+            )
+
+        elif format == "markdown":
+            if not run.results:
+                raise HTTPException(400, "Report not yet completed")
+            from pramana.lenses.base import LensResult
+            from pramana.pipeline.hypothesis import HypothesisQuery
+            from pramana.pipeline.orchestrator import AnalysisResults
+            from pramana.report.generator import generate_report
+
+            report_data = json.loads(run.results)
+            results = AnalysisResults()
+            for lr in report_data.get("lens_results", []):
+                results.add(LensResult(
+                    lens_name=lr["lens"],
+                    title=lr.get("title", lr["lens"]),
+                    content=lr.get("content", {}),
+                    summary=lr.get("summary", ""),
+                ))
+            hyp_data = report_data.get("hypothesis", {})
+            query = HypothesisQuery(**hyp_data) if hyp_data else HypothesisQuery()
+            md = generate_report(results, query, "markdown", settings)
+            from starlette.responses import Response
+            return Response(
+                content=md,
+                media_type="text/markdown",
+                headers={
+                    "Content-Disposition": f"attachment; filename=pramana_{run_id}_report.md"
+                },
+            )
+
+        else:
+            raise HTTPException(400, "format must be 'bibtex', 'csv', or 'markdown'")
+
+
+def _bibtex_key(authors: list[str], year: int | None, title: str) -> str:
+    """Generate a BibTeX citation key."""
+    import re
+    first_author = authors[0].split()[-1] if authors else "unknown"
+    first_author = re.sub(r"[^a-zA-Z]", "", first_author).lower()
+    year_str = str(year) if year else "xxxx"
+    first_word = re.sub(r"[^a-zA-Z]", "", title.split()[0]).lower() if title else "paper"
+    return f"{first_author}{year_str}{first_word}"
+
+
 def _build_report_summary(report_data: dict, max_chars: int = 8000) -> str:
     """Build a text summary of a report for chat context."""
     lines: list[str] = []
@@ -633,6 +758,7 @@ def _run_analysis(run_id: str) -> None:
         parsed = parse_hypothesis(
             store["hypothesis"], store["initiation_type"], settings,
             prior_research=store.get("prior_research", ""),
+            declared_domain=store.get("domain", ""),
         )
         store["progress"]["parsed"] = parsed.model_dump()
         logger.info("[%s] Parsed → %d domains, %d topics, %d queries",
@@ -649,10 +775,13 @@ def _run_analysis(run_id: str) -> None:
             "s2": corpus.total_from_s2,
             "arxiv": corpus.total_from_arxiv,
             "pubmed": corpus.total_from_pubmed,
+            "crossref": corpus.total_from_crossref,
         }
-        logger.info("[%s] Corpus: %d papers (S2=%d, arXiv=%d, PubMed=%d)",
-                    run_id[:8], len(corpus.papers), corpus.total_from_s2,
-                    corpus.total_from_arxiv, corpus.total_from_pubmed)
+        logger.info(
+            "[%s] Corpus: %d papers (S2=%d, arXiv=%d, PubMed=%d, CrossRef=%d)",
+            run_id[:8], len(corpus.papers), corpus.total_from_s2,
+            corpus.total_from_arxiv, corpus.total_from_pubmed, corpus.total_from_crossref,
+        )
 
         # Stage 3: Screen papers
         store["stage"] = "screening"

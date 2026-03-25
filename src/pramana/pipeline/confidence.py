@@ -1,7 +1,13 @@
 """Confidence scoring for extracted facts."""
 
+from __future__ import annotations
+
 import re
 from difflib import SequenceMatcher
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pramana.config import Settings
 
 
 def score_quote_in_source(direct_quote: str, source_text: str) -> float:
@@ -100,7 +106,7 @@ def score_quote_quality(
     return 0.4 * q_score + 0.3 * l_score + 0.3 * d_score
 
 
-def venue_tier_boost(venue: str, settings: "Settings | None" = None) -> float:
+def venue_tier_boost(venue: str, settings: Settings | None = None) -> float:
     """Return a confidence boost based on venue tier.
 
     Tier 1: +0.10, Tier 2: +0.0, Tier 3: -0.05, Unknown: 0.0

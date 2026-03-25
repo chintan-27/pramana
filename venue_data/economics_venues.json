@@ -1,0 +1,17 @@
+[
+    {"name": "American Economic Review", "venue_type": "journal", "domain": "economics", "tier": "1", "notes": "AEA flagship journal — top 5"},
+    {"name": "Quarterly Journal of Economics", "venue_type": "journal", "domain": "economics", "tier": "1", "notes": "QJE — top 5"},
+    {"name": "Journal of Political Economy", "venue_type": "journal", "domain": "economics", "tier": "1", "notes": "JPE — top 5"},
+    {"name": "Review of Economic Studies", "venue_type": "journal", "domain": "economics", "tier": "1", "notes": "RestUD — top 5"},
+    {"name": "Econometrica", "venue_type": "journal", "domain": "economics,econometrics", "tier": "1", "notes": "Top econometrics/theory journal"},
+    {"name": "Review of Economics and Statistics", "venue_type": "journal", "domain": "economics", "tier": "1", "notes": "ReStat — empirical economics"},
+    {"name": "Journal of Finance", "venue_type": "journal", "domain": "economics,finance", "tier": "1", "notes": "AFA flagship"},
+    {"name": "Journal of Financial Economics", "venue_type": "journal", "domain": "economics,finance", "tier": "1", "notes": "JFE — top finance journal"},
+    {"name": "Review of Financial Studies", "venue_type": "journal", "domain": "economics,finance", "tier": "1", "notes": "RFS"},
+    {"name": "Journal of Public Economics", "venue_type": "journal", "domain": "economics,public", "tier": "1", "notes": "Top public economics journal"},
+    {"name": "Journal of Labor Economics", "venue_type": "journal", "domain": "economics,labor", "tier": "1", "notes": "JOLE — top labor journal"},
+    {"name": "Journal of Human Resources", "venue_type": "journal", "domain": "economics,labor", "tier": "1", "notes": "JHR"},
+    {"name": "NBER Working Papers", "venue_type": "preprint", "domain": "economics", "tier": "2", "notes": "National Bureau of Economic Research"},
+    {"name": "Journal of Economic Perspectives", "venue_type": "journal", "domain": "economics", "tier": "1", "notes": "JEP — survey/accessible AEA"},
+    {"name": "American Economic Journal: Applied Economics", "venue_type": "journal", "domain": "economics", "tier": "1", "notes": "AEJ Applied"}
+]

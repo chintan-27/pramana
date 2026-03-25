@@ -1,0 +1,14 @@
+[
+    {"name": "Nature", "venue_type": "journal", "domain": "general,multidisciplinary", "tier": "1", "notes": "Top multidisciplinary journal"},
+    {"name": "Science", "venue_type": "journal", "domain": "general,multidisciplinary", "tier": "1", "notes": "AAAS flagship — top multidisciplinary"},
+    {"name": "Cell", "venue_type": "journal", "domain": "biology,general", "tier": "1", "notes": "Top biology journal"},
+    {"name": "PLOS Biology", "venue_type": "journal", "domain": "biology,general", "tier": "2", "notes": "PLOS flagship open access biology"},
+    {"name": "eLife", "venue_type": "journal", "domain": "biology,general", "tier": "1", "notes": "Open access life sciences"},
+    {"name": "Nature Communications", "venue_type": "journal", "domain": "general,multidisciplinary", "tier": "2", "notes": "Nature portfolio open access"},
+    {"name": "Science Advances", "venue_type": "journal", "domain": "general,multidisciplinary", "tier": "2", "notes": "AAAS open access"},
+    {"name": "Royal Society Open Science", "venue_type": "journal", "domain": "general,multidisciplinary", "tier": "2", "notes": "Royal Society open access"},
+    {"name": "SSRN", "venue_type": "preprint", "domain": "economics,social-science,law", "tier": "3", "notes": "Social science preprint server"},
+    {"name": "PsyArXiv", "venue_type": "preprint", "domain": "psychology,social-science", "tier": "3", "notes": "Psychology preprint server"},
+    {"name": "SocArXiv", "venue_type": "preprint", "domain": "social-science", "tier": "3", "notes": "Social science preprint server"},
+    {"name": "EconArXiv", "venue_type": "preprint", "domain": "economics", "tier": "3", "notes": "Economics preprint server"}
+]

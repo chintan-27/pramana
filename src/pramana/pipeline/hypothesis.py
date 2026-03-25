@@ -29,6 +29,8 @@ class HypothesisQuery(BaseModel):
     time_range: tuple[int, int] | None = None
     initiation_context: str = ""
     pico: PICOComponents = PICOComponents()
+    declared_domain: str = ""  # User-declared domain (e.g., "Computer Science", "Economics")
+    prior_research: str = ""  # Stored prior research text for lenses that need it
 
 
 def parse_hypothesis(
@@ -36,6 +38,7 @@ def parse_hypothesis(
     initiation_type: str,
     settings: Settings,
     prior_research: str = "",
+    declared_domain: str = "",
 ) -> HypothesisQuery:
     """Parse a free-text hypothesis into a structured query plan using LLM."""
     prior_section = ""
@@ -76,6 +79,8 @@ def parse_hypothesis(
         data["pico"] = PICOComponents()
 
     query = HypothesisQuery(**data)
+    query.declared_domain = declared_domain
+    query.prior_research = prior_research
 
     # Generate additional search queries from PICO components
     pico_queries = _pico_search_queries(query.pico)

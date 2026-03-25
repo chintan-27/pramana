@@ -1,0 +1,22 @@
+[
+    {"name": "Nature Human Behaviour", "venue_type": "journal", "domain": "social-science,psychology", "tier": "1", "notes": "Nature portfolio social/behavioral science"},
+    {"name": "Psychological Science", "venue_type": "journal", "domain": "psychology", "tier": "1", "notes": "APS flagship journal"},
+    {"name": "Journal of Personality and Social Psychology", "venue_type": "journal", "domain": "psychology,social-science", "tier": "1", "notes": "Top social psychology journal"},
+    {"name": "American Sociological Review", "venue_type": "journal", "domain": "sociology", "tier": "1", "notes": "ASA flagship journal"},
+    {"name": "American Journal of Sociology", "venue_type": "journal", "domain": "sociology", "tier": "1", "notes": "Top sociology journal"},
+    {"name": "American Political Science Review", "venue_type": "journal", "domain": "political-science", "tier": "1", "notes": "APSA flagship journal"},
+    {"name": "American Journal of Political Science", "venue_type": "journal", "domain": "political-science", "tier": "1", "notes": "AJPS"},
+    {"name": "Journal of Politics", "venue_type": "journal", "domain": "political-science", "tier": "1", "notes": "Top political science journal"},
+    {"name": "Proceedings of the National Academy of Sciences", "venue_type": "journal", "domain": "social-science,general", "tier": "1", "notes": "PNAS — multidisciplinary"},
+    {"name": "PNAS Social Sciences", "venue_type": "journal", "domain": "social-science", "tier": "1", "notes": "PNAS social sciences section"},
+    {"name": "Annual Review of Psychology", "venue_type": "journal", "domain": "psychology", "tier": "1", "notes": "Authoritative psychology reviews"},
+    {"name": "Annual Review of Sociology", "venue_type": "journal", "domain": "sociology", "tier": "1", "notes": "Authoritative sociology reviews"},
+    {"name": "Social Forces", "venue_type": "journal", "domain": "sociology", "tier": "2", "notes": "Leading sociology journal"},
+    {"name": "Journal of Experimental Psychology: General", "venue_type": "journal", "domain": "psychology", "tier": "1", "notes": "APA flagship experimental journal"},
+    {"name": "Psychological Bulletin", "venue_type": "journal", "domain": "psychology", "tier": "1", "notes": "High-impact meta-analysis journal"},
+    {"name": "Psychological Review", "venue_type": "journal", "domain": "psychology", "tier": "1", "notes": "Theoretical psychology"},
+    {"name": "Journal of Child Psychology and Psychiatry", "venue_type": "journal", "domain": "psychology,child-development", "tier": "1", "notes": "Top child mental health journal"},
+    {"name": "Developmental Psychology", "venue_type": "journal", "domain": "psychology,development", "tier": "1", "notes": "APA developmental journal"},
+    {"name": "Child Development", "venue_type": "journal", "domain": "psychology,child-development", "tier": "1", "notes": "SRCD flagship journal"},
+    {"name": "Journal of Abnormal Psychology", "venue_type": "journal", "domain": "psychology,clinical", "tier": "1", "notes": "Clinical/abnormal psychology"}
+]

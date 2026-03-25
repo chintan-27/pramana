@@ -113,7 +113,11 @@ def extract_all_evidence(
             facts = extract_evidence_from_text(text, title, hypothesis_text, settings)
 
         # Apply confidence scoring
-        from pramana.pipeline.confidence import compute_confidence, score_quote_quality, venue_tier_boost
+        from pramana.pipeline.confidence import (
+            compute_confidence,
+            score_quote_quality,
+            venue_tier_boost,
+        )
         paper_venue = (paper.get("venue") or "")
         v_boost = venue_tier_boost(paper_venue, settings)
         for fact in facts:
