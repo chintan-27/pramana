@@ -2,12 +2,17 @@
 
 import logging
 import re
+import time
 
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 
 from pramana.config import Settings
 
 logger = logging.getLogger(__name__)
+
+# Minimum seconds between LLM calls (rate limit guard)
+_MIN_INTERVAL = 0.5
+_last_call_time: float = 0.0
 
 
 def get_llm_client(settings: Settings) -> OpenAI:
@@ -16,6 +21,15 @@ def get_llm_client(settings: Settings) -> OpenAI:
         base_url=settings.llm_base_url,
         api_key=settings.llm_api_key or "not-set",
     )
+
+
+def _throttle() -> None:
+    """Enforce minimum interval between LLM calls."""
+    global _last_call_time
+    elapsed = time.monotonic() - _last_call_time
+    if elapsed < _MIN_INTERVAL:
+        time.sleep(_MIN_INTERVAL - elapsed)
+    _last_call_time = time.monotonic()
 
 
 def chat(
@@ -39,7 +53,19 @@ def chat(
         kwargs["response_format"] = response_format
 
     logger.debug("LLM request: model=%s messages=%d", resolved_model, len(messages))
-    response = client.chat.completions.create(**kwargs)
+
+    # Retry up to 3 times on rate limit with exponential backoff
+    for attempt in range(3):
+        _throttle()
+        try:
+            response = client.chat.completions.create(**kwargs)
+            break
+        except RateLimitError as e:
+            wait = 2 ** (attempt + 1)   # 2s, 4s, 8s
+            logger.warning("Rate limited (attempt %d/3), retrying in %ds: %s", attempt + 1, wait, e)
+            if attempt == 2:
+                raise
+            time.sleep(wait)
 
     content = response.choices[0].message.content if response.choices else None
     if content is None:
