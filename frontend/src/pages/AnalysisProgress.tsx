@@ -8,7 +8,7 @@ const STAGES = [
   { key: 'screening', label: 'Screening papers', sub: 'Filtering by relevance (embedding + LLM)', icon: '03' },
   { key: 'extraction', label: 'Extracting evidence', sub: 'Facts, quotes, locations from each paper', icon: '04' },
   { key: 'normalization', label: 'Normalizing', sub: 'Canonicalizing terms, building vectors', icon: '05' },
-  { key: 'analysis', label: 'Running lenses', sub: 'Applying analytical lenses to evidence', icon: '06' },
+  { key: 'analysis', label: 'Running analysis flows', sub: 'Routing to workflows, running analytical lenses', icon: '06' },
   { key: 'report', label: 'Generating report', sub: 'Compiling findings and recommendations', icon: '07' },
 ];
 
@@ -89,12 +89,17 @@ export default function AnalysisProgress() {
               <p className="text-[10px] text-cream-faint font-mono">facts extracted</p>
             </div>
           )}
-          {progress.lenses_completed != null && (
+          {progress.selected_flows != null ? (
+            <div className="bg-bg-card border border-amber/20 rounded-lg p-3 text-center">
+              <p className="text-lg font-display font-600 text-amber">{(progress.selected_flows as string[]).length}</p>
+              <p className="text-[10px] text-cream-faint font-mono">flows active</p>
+            </div>
+          ) : progress.lenses_completed != null ? (
             <div className="bg-bg-card border border-line rounded-lg p-3 text-center">
               <p className="text-lg font-display font-600 text-cream">{(progress.lenses_completed as string[]).length}</p>
               <p className="text-[10px] text-cream-faint font-mono">lenses done</p>
             </div>
-          )}
+          ) : null}
         </div>
       )}
 
@@ -147,7 +152,8 @@ export default function AnalysisProgress() {
                   <p className="text-[11px] text-cream-faint font-mono mt-1">
                     S2: {(progress.sources as Record<string, number>).s2} &middot;
                     arXiv: {(progress.sources as Record<string, number>).arxiv} &middot;
-                    PubMed: {(progress.sources as Record<string, number>).pubmed}
+                    PubMed: {(progress.sources as Record<string, number>).pubmed} &middot;
+                    CrossRef: {(progress.sources as Record<string, number>).crossref ?? 0}
                   </p>
                 )}
                 {isDone && stage.key === 'screening' && progress.papers_passed != null && (
@@ -164,6 +170,25 @@ export default function AnalysisProgress() {
                   <p className="text-[11px] text-cream-faint font-mono mt-1">
                     {String(progress.mappings)} mappings &middot; {String(progress.categories)} categories
                   </p>
+                )}
+                {(isActive || isDone) && stage.key === 'analysis' && !!progress.selected_flows && (
+                  <div className="mt-2 space-y-1.5">
+                    <div className="flex flex-wrap gap-1.5">
+                      {(progress.selected_flows as string[]).map((f) => (
+                        <span
+                          key={f}
+                          className="px-2 py-0.5 text-[10px] font-mono rounded border border-amber/30 bg-amber-subtle text-amber"
+                        >
+                          {f.replace(/_/g, ' ')}
+                        </span>
+                      ))}
+                    </div>
+                    {!!progress.routing_reasoning && (
+                      <p className="text-[11px] text-cream-faint italic leading-relaxed">
+                        {String(progress.routing_reasoning)}
+                      </p>
+                    )}
+                  </div>
                 )}
                 {isDone && stage.key === 'analysis' && !!progress.lenses_completed && (
                   <p className="text-[11px] text-cream-faint font-mono mt-1">
