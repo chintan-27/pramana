@@ -81,6 +81,9 @@ def parse_hypothesis(
     query = HypothesisQuery(**data)
     query.declared_domain = declared_domain
     query.prior_research = prior_research
+    # Claim verification mode: override initiation_context so ClaimVerificationLens activates
+    if initiation_type == "verify":
+        query.initiation_context = "verify"
 
     # Generate additional search queries from PICO components
     pico_queries = _pico_search_queries(query.pico)

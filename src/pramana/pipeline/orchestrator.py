@@ -5,11 +5,18 @@ import logging
 from pramana.config import Settings
 from pramana.lenses.base import Lens, LensResult
 from pramana.lenses.bias_detection import BiasDetectionLens
+from pramana.lenses.claim_verification import ClaimVerificationLens
+from pramana.lenses.contradiction import ContradictionLens
 from pramana.lenses.evidence_table import EvidenceTableLens
 from pramana.lenses.gap_discovery import GapDiscoveryLens
 from pramana.lenses.knowledge_graph import KnowledgeGraphLens
+from pramana.lenses.lit_review import LitReviewLens
 from pramana.lenses.meta_analysis import MetaAnalysisLens
+from pramana.lenses.peer_review import PeerReviewLens
+from pramana.lenses.replication import ReplicationLens
 from pramana.lenses.research_planning import ResearchPlanningLens
+from pramana.lenses.research_proposal import ResearchProposalLens
+from pramana.lenses.statistical import StatisticalAggregationLens
 from pramana.lenses.trace_ancestry import TraceAncestryLens
 from pramana.lenses.venue_mapping import VenueMappingLens
 from pramana.pipeline.corpus import Corpus
@@ -21,13 +28,20 @@ logger = logging.getLogger(__name__)
 # All available lenses in priority order
 ALL_LENSES: list[Lens] = [
     EvidenceTableLens(),
+    ClaimVerificationLens(),    # verify mode — runs first if activated
     GapDiscoveryLens(),
+    ContradictionLens(),
+    ReplicationLens(),
+    StatisticalAggregationLens(),
     BiasDetectionLens(),
     MetaAnalysisLens(),
     VenueMappingLens(),
     KnowledgeGraphLens(),
     TraceAncestryLens(),
     ResearchPlanningLens(),
+    ResearchProposalLens(),
+    LitReviewLens(),
+    PeerReviewLens(),
 ]
 
 

@@ -57,7 +57,7 @@ def analyze(
     settings = get_settings()
     settings.ensure_dirs()
 
-    valid_types = {"new", "related", "continuation", "joining"}
+    valid_types = {"new", "related", "continuation", "joining", "verify"}
     if initiation_type not in valid_types:
         console.print(f"[red]Error:[/red] Invalid initiation type '{initiation_type}'.")
         console.print(f"Valid types: {', '.join(sorted(valid_types))}")

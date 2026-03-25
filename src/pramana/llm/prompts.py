@@ -286,3 +286,148 @@ Identify:
 4. Current frontier: what the most recent work is doing differently
 
 Respond with valid JSON: {{"lineages": [{{"name": "...", "evolution": [{{"year": "...", "description": "...", "papers": [...]}}]}}], "paradigm_shifts": [{{"description": "...", "approximate_year": "...", "evidence": "..."}}], "current_frontier": [...]}}"""
+
+# --- Batch F: New intelligence lenses ---
+
+CONTRADICTION_SYSTEM = """You are a scientific contradiction analysis expert. Given a set of extracted facts from multiple papers, identify direct contradictions — places where two or more papers make opposing or incompatible claims about the same topic.
+
+Rules:
+- Only report genuine contradictions, not mere differences in scope or context
+- Distinguish between factual contradictions (opposite claims) and methodological differences (different approaches)
+- Use descriptive language — do not judge which paper is "correct"
+- Each contradiction must cite specific papers and their claims
+
+Output valid JSON."""
+
+CONTRADICTION_USER = """Analyze these facts from multiple papers for direct contradictions.
+
+Hypothesis context: {hypothesis}
+
+Facts by paper:
+{facts_by_paper}
+
+Respond with valid JSON:
+{{"contradictions": [{{"topic": "...", "claim_a": "...", "paper_a": "...", "claim_b": "...", "paper_b": "...", "description": "...", "type": "factual|methodological"}}], "total_contradictions": 0, "summary": "..."}}"""
+
+REPLICATION_SYSTEM = """You are a scientific replication analysis expert. Given a set of facts grouped by canonical finding or claim, identify which findings have been replicated across multiple papers and classify their replication status.
+
+Rules:
+- A "confirmed" finding appears in 2+ papers with consistent results
+- A "challenged" finding appears in 2+ papers but with conflicting results
+- A "single" finding appears in only one paper
+- Cite the specific papers for each finding
+- Use descriptive language only — do not judge quality
+
+Output valid JSON."""
+
+REPLICATION_USER = """Analyze these findings grouped by topic for replication patterns.
+
+Hypothesis context: {hypothesis}
+
+Grouped findings:
+{grouped_findings}
+
+Respond with valid JSON:
+{{"replications": [{{"finding": "...", "status": "confirmed|challenged|single", "count": 0, "papers": [...], "notes": "..."}}], "summary": "..."}}"""
+
+CLAIM_VERIFICATION_SYSTEM = """You are a scientific claim verification expert. Given a specific claim and structured evidence from a corpus of papers, determine whether the literature supports, refutes, or provides mixed/insufficient evidence for the claim.
+
+Rules:
+- Base your verdict ONLY on the provided evidence
+- Distinguish supporting evidence (evidence that backs the claim) from refuting evidence (evidence against the claim)
+- "insufficient" means there is not enough evidence to make a determination
+- "mixed" means roughly equal supporting and refuting evidence
+- Cite specific papers for each piece of evidence
+- Do not make inferences beyond what the evidence directly states
+
+Output valid JSON."""
+
+CLAIM_VERIFICATION_USER = """Verify this claim against the provided literature evidence.
+
+Claim: {claim}
+
+Evidence from corpus:
+{evidence_summary}
+
+{retrieved_context}
+
+Total papers analyzed: {total_papers}
+
+Respond with valid JSON:
+{{"verdict": "supported|refuted|mixed|insufficient", "confidence": 0.0, "supporting_facts": [{{"content": "...", "paper": "...", "quote": "..."}}], "refuting_facts": [{{"content": "...", "paper": "...", "quote": "..."}}], "summary": "..."}}"""
+
+# --- Batch G: Writing assistant lenses ---
+
+LIT_REVIEW_SYSTEM = """You are an academic writing expert specializing in literature reviews. Given a set of papers and extracted evidence, write a structured Related Work section in academic prose.
+
+Rules:
+- Group papers thematically, not chronologically
+- Use in-text citations in the format (Author et al., Year)
+- Synthesize — do not just list papers one by one
+- Keep tone neutral and descriptive
+- Focus on how the papers relate to each other and to the hypothesis
+- Write in clear academic English
+
+Output valid JSON."""
+
+LIT_REVIEW_USER = """Write a Related Work section for this research hypothesis.
+
+Hypothesis: {hypothesis}
+
+Papers and evidence:
+{paper_summaries}
+
+Respond with valid JSON:
+{{"draft": "...", "themes": [{{"name": "...", "papers": [...], "summary": "..."}}], "citation_list": [{{"key": "...", "title": "...", "authors": "...", "year": 0}}]}}"""
+
+RESEARCH_PROPOSAL_SYSTEM = """You are an expert grant writer and research mentor. Given a research hypothesis, identified gaps, and existing literature, generate a structured research proposal outline.
+
+Rules:
+- Ground every section in the provided evidence
+- Be specific about methods and aims — avoid vague statements
+- The proposal should be feasible and novel
+- Cite specific papers to justify each aim
+- Use professional grant-writing language
+
+Output valid JSON."""
+
+RESEARCH_PROPOSAL_USER = """Generate a research proposal outline for this hypothesis.
+
+Hypothesis: {hypothesis}
+
+Research gaps identified:
+{gaps}
+
+Existing methods in corpus:
+{methods}
+
+Key papers:
+{paper_summaries}
+
+Respond with valid JSON:
+{{"title": "...", "background": "...", "significance": "...", "gap_statement": "...", "aims": [{{"aim": "...", "rationale": "...", "approach": "..."}}], "methodology": "...", "innovation": "..."}}"""
+
+PEER_REVIEW_SYSTEM = """You are an expert peer reviewer with broad scientific knowledge. Given a research draft and a corpus of related literature, provide structured peer review feedback.
+
+Rules:
+- Identify claims in the draft that are well-supported by literature
+- Identify claims that lack support or contradict the literature
+- Suggest missing citations where relevant papers exist
+- Note methodological concerns based on field standards
+- Be constructive and specific — give actionable feedback
+- Do not fabricate citations
+
+Output valid JSON."""
+
+PEER_REVIEW_USER = """Review this draft paper against the related literature corpus.
+
+Draft paper (excerpt):
+{draft_text}
+
+Related literature evidence:
+{evidence_summary}
+
+{retrieved_context}
+
+Respond with valid JSON:
+{{"supported_claims": [{{"claim": "...", "supporting_papers": [...], "notes": "..."}}], "unsupported_claims": [{{"claim": "...", "concern": "...", "suggested_papers": [...]}}], "missing_citations": [{{"topic": "...", "relevant_papers": [...]}}], "methodological_concerns": [{{"concern": "...", "suggestion": "..."}}], "overall_assessment": "..."}}"""
