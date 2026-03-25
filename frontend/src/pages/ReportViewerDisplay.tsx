@@ -1,6 +1,6 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { Report } from '../api/client';
+import type { Report, LensResult } from '../api/client';
 import { useTheme } from '../theme';
 import ReportChat from './ReportChat';
 import {
@@ -36,6 +36,7 @@ interface Props {
 export default function ReportViewerDisplay({ report, error, runId }: Props) {
   const { theme } = useTheme();
   const C = theme === 'dark' ? DARK : LIGHT;
+  const [activeFlow, setActiveFlow] = useState<string | null>(null);
 
   if (error) {
     return (
@@ -98,6 +99,62 @@ export default function ReportViewerDisplay({ report, error, runId }: Props) {
           </p>
         </div>
       </Sec>
+
+      {/* ── Analysis Flows ── */}
+      {report.flows && report.flows.selected.length > 0 && (
+        <Sec>
+          <SLabel>Analysis Flows</SLabel>
+          {report.flows.reasoning && (
+            <p className="text-sm text-cream-muted mb-4 italic">{report.flows.reasoning}</p>
+          )}
+          {/* Flow tabs */}
+          <div className="flex flex-wrap gap-2 mb-5">
+            {report.flows.selected.map((flowName) => {
+              const fr = report.flows!.results[flowName];
+              if (!fr) return null;
+              const isActive = activeFlow === flowName || (activeFlow === null && report.flows!.selected[0] === flowName);
+              return (
+                <button
+                  key={flowName}
+                  onClick={() => setActiveFlow(flowName)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-all ${
+                    isActive
+                      ? 'bg-amber text-bg-card border-amber'
+                      : 'bg-bg-card border-line text-cream-dim hover:border-amber/40 hover:text-cream'
+                  }`}
+                >
+                  {fr.title}
+                </button>
+              );
+            })}
+          </div>
+          {/* Active flow content */}
+          {report.flows.selected.map((flowName) => {
+            const fr = report.flows!.results[flowName];
+            if (!fr) return null;
+            const isActive = activeFlow === flowName || (activeFlow === null && report.flows!.selected[0] === flowName);
+            if (!isActive) return null;
+            return (
+              <div key={flowName} className="animate-fade-up">
+                <p className="text-sm text-cream-muted mb-4">{fr.description}</p>
+                <div className="space-y-3">
+                  {fr.lens_results.map((lr: LensResult) => (
+                    <div key={lr.lens} className="p-4 bg-bg-card border border-line rounded-lg">
+                      <div className="flex items-start justify-between gap-3 mb-1">
+                        <p className="text-sm font-semibold text-cream">{lr.title}</p>
+                        <span className="text-[10px] font-mono text-cream-faint bg-bg-inset px-1.5 py-0.5 rounded shrink-0">
+                          {lr.lens}
+                        </span>
+                      </div>
+                      <p className="text-sm text-cream-muted leading-relaxed">{lr.summary}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </Sec>
+      )}
 
       {/* ── Evidence Breakdown ── */}
       {s.factTypeData.length > 0 && (

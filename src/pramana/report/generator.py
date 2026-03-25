@@ -22,7 +22,7 @@ def generate_report(
 
 def _generate_json(results: AnalysisResults, query: HypothesisQuery) -> str:
     """Generate JSON report."""
-    report = {
+    report: dict = {
         "hypothesis": {
             "domains": query.domains,
             "topics": query.topics,
@@ -41,6 +41,30 @@ def _generate_json(results: AnalysisResults, query: HypothesisQuery) -> str:
             for r in results.lens_results
         ],
     }
+
+    # Include flow-level structure when flow routing was used
+    if results.flows:
+        report["flows"] = {
+            "selected": results.selected_flows,
+            "reasoning": results.routing_reasoning,
+            "results": {
+                flow_name: {
+                    "title": fr.flow_title,
+                    "description": fr.description,
+                    "lens_results": [
+                        {
+                            "lens": r.lens_name,
+                            "title": r.title,
+                            "summary": r.summary,
+                            "content": r.content,
+                        }
+                        for r in fr.lens_results
+                    ],
+                }
+                for flow_name, fr in results.flows.items()
+            },
+        }
+
     return json.dumps(report, indent=2)
 
 

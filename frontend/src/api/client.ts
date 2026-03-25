@@ -6,6 +6,7 @@ export interface AnalyzeRequest {
   max_papers: number;
   prior_research?: string;
   pdf_file_ids?: string[];
+  action?: string;  // free-text: what the user wants to do (routes to analysis flows)
 }
 
 export interface AnalyzeResponse {
@@ -58,15 +59,28 @@ export interface Venue {
   tier: string;
 }
 
+export interface LensResult {
+  lens: string;
+  title: string;
+  summary: string;
+  content: Record<string, unknown>;
+}
+
+export interface FlowResult {
+  title: string;
+  description: string;
+  lens_results: LensResult[];
+}
+
 export interface Report {
   hypothesis: Record<string, unknown>;
   active_lenses: string[];
-  lens_results: Array<{
-    lens: string;
-    title: string;
-    summary: string;
-    content: Record<string, unknown>;
-  }>;
+  lens_results: LensResult[];
+  flows?: {
+    selected: string[];
+    reasoning: string;
+    results: Record<string, FlowResult>;
+  };
 }
 
 export async function startAnalysis(request: AnalyzeRequest): Promise<AnalyzeResponse> {

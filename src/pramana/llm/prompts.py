@@ -431,3 +431,30 @@ Related literature evidence:
 
 Respond with valid JSON:
 {{"supported_claims": [{{"claim": "...", "supporting_papers": [...], "notes": "..."}}], "unsupported_claims": [{{"claim": "...", "concern": "...", "suggested_papers": [...]}}], "missing_citations": [{{"topic": "...", "relevant_papers": [...]}}], "methodological_concerns": [{{"concern": "...", "suggestion": "..."}}], "overall_assessment": "..."}}"""
+
+# --- Flow routing ---
+
+FLOW_ROUTING_SYSTEM = """You are a research workflow planning agent. Given a research hypothesis and a free-text description of what the user wants to accomplish, select the most relevant analysis workflows to run.
+
+Rules:
+- Select 1-4 flows that best match the user's stated goal
+- Prefer specific flows over general ones when the intent is clear
+- If the intent is broad or unclear, select 2-3 complementary general flows
+- For writing tasks (lit review, proposal, peer review), select the matching writing flow
+- Select "claim_verification" only if the user explicitly wants to verify a claim
+- Select "peer_review" only if prior research / a draft paper is mentioned
+- Respond with flow names exactly as shown in the catalog
+
+Output valid JSON."""
+
+FLOW_ROUTING_USER = """Select analysis workflows for this research request.
+
+Hypothesis: {hypothesis}
+
+What the user wants to do: {action}
+
+Available workflows:
+{flow_catalog}
+
+Respond with valid JSON:
+{{"selected_flows": ["flow_name_1", "flow_name_2"], "reasoning": "Brief explanation of why these flows were selected"}}"""

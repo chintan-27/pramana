@@ -90,7 +90,8 @@ class AnalyzeRequest(BaseModel):
     max_papers: int = 50
     prior_research: str = ""
     pdf_file_ids: list[str] = []
-    domain: str = ""  # User-declared domain (e.g. "Computer Science", "Economics")
+    domain: str = ""   # User-declared domain (e.g. "Computer Science", "Economics")
+    action: str = ""   # Free-text: what the user wants to do (routes to analysis flows)
 
 
 class AnalyzeResponse(BaseModel):
@@ -250,6 +251,7 @@ async def start_analysis(request: AnalyzeRequest, background_tasks: BackgroundTa
         "max_papers": request.max_papers,
         "prior_research": request.prior_research,
         "domain": request.domain,
+        "action": request.action,
         "progress": {},
         "result": None,
         "error": None,
@@ -820,12 +822,25 @@ def _run_analysis(run_id: str) -> None:
         logger.info("[%s] Normalized: %d mappings, %d categories",
                     run_id[:8], len(normalized.canonical_mappings), len(normalized.categories))
 
-        # Stage 6: Run analysis
+        # Stage 6: Route to analysis flows and run lenses
         store["stage"] = "analysis"
-        store["progress"] = {"step": 6, "total": 7, "description": "Running analytical lenses"}
-        logger.info("[%s] Stage 6/7: Running analytical lenses", run_id[:8])
-        from pramana.pipeline.orchestrator import run_analysis as run_lenses
-        results = run_lenses(corpus, normalized, parsed, settings)
+        store["progress"] = {
+            "step": 6, "total": 7, "description": "Routing and running analysis flows"
+        }
+        logger.info("[%s] Stage 6/7: Routing analysis flows", run_id[:8])
+        from pramana.flows.router import select_flows
+        from pramana.pipeline.orchestrator import run_flows
+        action = store.get("action", "")
+        selected_flows, routing_reasoning = select_flows(
+            store["hypothesis"], action, parsed, settings
+        )
+        store["progress"]["selected_flows"] = [f.name for f in selected_flows]
+        store["progress"]["routing_reasoning"] = routing_reasoning
+        logger.info(
+            "[%s] Flows selected: %s",
+            run_id[:8], ", ".join(f.name for f in selected_flows),
+        )
+        results = run_flows(corpus, normalized, parsed, settings, selected_flows, routing_reasoning)
         store["progress"]["lenses_completed"] = results.active_lenses
         logger.info("[%s] Lenses completed: %s", run_id[:8], ", ".join(results.active_lenses))
 

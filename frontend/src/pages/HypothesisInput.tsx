@@ -12,6 +12,7 @@ const TYPES = [
 export default function HypothesisInput() {
   const navigate = useNavigate();
   const [hypothesis, setHypothesis] = useState('');
+  const [action, setAction] = useState('');
   const [type, setType] = useState('new');
   const [maxPapers, setMaxPapers] = useState(50);
   const [priorResearch, setPriorResearch] = useState('');
@@ -35,6 +36,7 @@ export default function HypothesisInput() {
         max_papers: maxPapers,
         prior_research: priorResearch.trim() || undefined,
         pdf_file_ids: uploadedPdfs.length > 0 ? uploadedPdfs.map((p) => p.file_id) : undefined,
+        action: action.trim() || undefined,
       });
       navigate(`/analysis/${result.run_id}`);
     } catch (err) {
@@ -102,6 +104,23 @@ export default function HypothesisInput() {
               {hypothesis.length}
             </span>
           )}
+        </div>
+
+        {/* Action / intent */}
+        <div>
+          <label className="text-[11px] font-mono text-cream-muted tracking-widest uppercase mb-2 block">
+            What would you like to do? <span className="text-cream-faint normal-case tracking-normal">(optional)</span>
+          </label>
+          <p className="text-[12px] text-cream-faint mb-2">
+            Describe your goal in plain language — Pramana will choose the right analysis workflows.
+            e.g. "write a literature review", "find gaps in this research area", "verify this claim", "prepare a grant proposal"
+          </p>
+          <textarea
+            value={action}
+            onChange={(e) => setAction(e.target.value)}
+            placeholder="e.g. I want to write a literature review and identify gaps for a grant proposal"
+            className="w-full h-20 p-4 bg-bg-card border border-line rounded-lg text-cream text-[15px] leading-relaxed placeholder:text-cream-faint/60 resize-none focus:outline-none focus:border-amber/40 focus:ring-1 focus:ring-amber/20 transition-all"
+          />
         </div>
 
         {/* Research context */}
