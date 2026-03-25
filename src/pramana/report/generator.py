@@ -30,6 +30,7 @@ def _generate_json(results: AnalysisResults, query: HypothesisQuery) -> str:
             "evaluation_focus": query.evaluation_focus,
             "initiation_context": query.initiation_context,
         },
+        "executive_summary": results.executive_summary,
         "active_lenses": results.active_lenses,
         "lens_results": [
             {

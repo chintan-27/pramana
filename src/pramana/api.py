@@ -802,13 +802,33 @@ def _run_analysis(run_id: str) -> None:
 
         # Stage 4: Extract evidence
         store["stage"] = "extraction"
-        store["progress"] = {"step": 4, "total": 7, "description": "Extracting evidence"}
+        store["progress"] = {
+            "step": 4, "total": 7,
+            "description": f"Extracting evidence (0 / {passed_count} papers)",
+            "papers_processed": 0,
+            "papers_total": passed_count,
+            "facts_extracted": 0,
+            "current_paper": "",
+        }
         logger.info("[%s] Stage 4/7: Extracting evidence from %d papers",
                     run_id[:8], passed_count)
+
+        def _extraction_progress(done: int, total: int, title: str) -> None:
+            short = title[:60] + "…" if len(title) > 60 else title
+            store["progress"]["papers_processed"] = done
+            store["progress"]["papers_total"] = total
+            store["progress"]["current_paper"] = short
+            store["progress"]["description"] = (
+                f"Extracting evidence ({done} / {total}) — {short}"
+            )
+
         from pramana.pipeline.extraction import extract_all_evidence
-        evidence = extract_all_evidence(corpus, parsed, settings)
+        evidence = extract_all_evidence(corpus, parsed, settings,
+                                        progress_callback=_extraction_progress)
         store["progress"]["facts_extracted"] = len(evidence)
-        store["progress"]["papers_processed"] = passed_count
+        store["progress"]["description"] = (
+            f"Extracted {len(evidence)} facts from {passed_count} papers"
+        )
         logger.info("[%s] Extracted %d facts", run_id[:8], len(evidence))
 
         # Stage 5: Normalize
@@ -844,11 +864,14 @@ def _run_analysis(run_id: str) -> None:
         store["progress"]["lenses_completed"] = results.active_lenses
         logger.info("[%s] Lenses completed: %s", run_id[:8], ", ".join(results.active_lenses))
 
-        # Stage 7: Generate report
+        # Stage 7: Synthesize + generate report
         store["stage"] = "report"
-        store["progress"] = {"step": 7, "total": 7, "description": "Generating report"}
-        logger.info("[%s] Stage 7/7: Generating report", run_id[:8])
+        store["progress"] = {"step": 7, "total": 7, "description": "Synthesizing findings"}
+        logger.info("[%s] Stage 7/7: Synthesizing and generating report", run_id[:8])
+        from pramana.pipeline.orchestrator import synthesize_summary
         from pramana.report.generator import generate_report
+        results.executive_summary = synthesize_summary(results, parsed, settings)
+        store["progress"]["description"] = "Generating report"
         report_json = generate_report(results, parsed, "json", settings)
 
         store["status"] = "completed"

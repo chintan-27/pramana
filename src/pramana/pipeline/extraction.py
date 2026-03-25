@@ -2,6 +2,7 @@
 
 import json
 import logging
+from collections.abc import Callable
 
 from pydantic import BaseModel
 
@@ -84,23 +85,34 @@ def extract_all_evidence(
     corpus: Corpus,
     query: HypothesisQuery,
     settings: Settings,
+    progress_callback: Callable[[int, int, str], None] | None = None,
 ) -> list[ExtractedFact]:
-    """Extract evidence from all papers in the corpus."""
+    """Extract evidence from all papers in the corpus.
+
+    progress_callback(current, total, paper_title) is called after each paper.
+    """
     all_facts: list[ExtractedFact] = []
     hypothesis_text = " ".join(query.topics) if query.topics else ""
 
-    logger.info("Extracting evidence from %d papers", len(corpus.papers))
+    active_papers = [p for p in corpus.papers if not p.get("screened_out")]
+    total = len(active_papers)
+    logger.info("Extracting evidence from %d papers", total)
 
+    done = 0
     for paper in corpus.papers:
         # Skip screened-out papers
         if paper.get("screened_out"):
             logger.debug("Skipping screened-out paper: '%s'", paper.get("title", "")[:50])
             continue
 
+        done += 1
+        title = paper.get("title", "Unknown")
+
         # Use full text if available, fall back to abstract
         text = paper.get("full_text") or paper.get("abstract") or ""
-        title = paper.get("title", "Unknown")
         paper_db_id = paper.get("db_id")
+        if progress_callback:
+            progress_callback(done, total, title)
 
         if not text or not text.strip():
             continue

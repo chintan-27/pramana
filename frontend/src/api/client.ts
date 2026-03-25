@@ -72,8 +72,15 @@ export interface FlowResult {
   lens_results: LensResult[];
 }
 
+export interface ExecutiveSummary {
+  headline: string;
+  bullets: string[];
+  confidence: string;
+}
+
 export interface Report {
   hypothesis: Record<string, unknown>;
+  executive_summary?: ExecutiveSummary;
   active_lenses: string[];
   lens_results: LensResult[];
   flows?: {

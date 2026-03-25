@@ -74,6 +74,8 @@ class AnalysisResults:
         self.flows: dict[str, FlowResult] = {}
         self.selected_flows: list[str] = []
         self.routing_reasoning: str = ""
+        # Executive summary (populated by synthesize_summary)
+        self.executive_summary: dict = {}
 
     def add(self, result: LensResult) -> None:
         if result.lens_name not in self.active_lenses:
@@ -85,6 +87,45 @@ class AnalysisResults:
             if r.lens_name == lens_name:
                 return r
         return None
+
+
+def synthesize_summary(
+    results: AnalysisResults,
+    query: HypothesisQuery,
+    settings: Settings,
+) -> dict:
+    """Run a single LLM call to produce an executive summary across all lens results."""
+    import json as _json
+
+    from pramana.llm.client import chat_json as _chat_json
+    from pramana.llm.prompts import EXECUTIVE_SUMMARY_SYSTEM, EXECUTIVE_SUMMARY_USER
+
+    hypothesis_text = " ".join(query.topics) or " ".join(query.domains) or query.initiation_context
+
+    lines = []
+    for r in results.lens_results:
+        if r.summary and r.lens_name != "evidence_table":
+            lines.append(f"[{r.title}] {r.summary}")
+
+    if not lines:
+        return {}
+
+    try:
+        messages = [
+            {"role": "system", "content": EXECUTIVE_SUMMARY_SYSTEM},
+            {
+                "role": "user",
+                "content": EXECUTIVE_SUMMARY_USER.format(
+                    hypothesis=hypothesis_text,
+                    summaries="\n".join(lines[:20]),
+                ),
+            },
+        ]
+        response = _chat_json(messages, settings)
+        return _json.loads(response)
+    except Exception as e:
+        logger.warning("Executive summary failed: %s", e)
+        return {}
 
 
 def run_analysis(
@@ -138,8 +179,12 @@ def run_flows(
                 needed.append(ln)
                 seen.add(ln)
 
-    # Run each unique lens once and cache result
-    lens_cache: dict[str, LensResult] = {}
+    # Load expert pool (domain-specialized MoE agents)
+    import pramana.agents.specialists  # noqa: F401 — triggers registration
+    from pramana.agents.pool import run_parallel_experts
+
+    # Collect active lens objects
+    active_lenses: list[Lens] = []
     for lens_name in needed:
         lens = _LENS_BY_NAME.get(lens_name)
         if lens is None:
@@ -148,21 +193,26 @@ def run_flows(
         if not lens.should_activate(query):
             logger.debug("Lens '%s' not activated for this query", lens_name)
             continue
-        logger.info("Running lens: %s", lens_name)
-        try:
-            result = lens.analyze(corpus, evidence, query, settings)
+        active_lenses.append(lens)
+
+    logger.info(
+        "Running %d lenses in parallel via MoE pool: %s",
+        len(active_lenses), ", ".join(ln.name for ln in active_lenses),
+    )
+
+    # Run all lenses in parallel, MoE routing per lens
+    parallel_results = run_parallel_experts(
+        active_lenses, corpus, evidence, query, settings, max_workers=4
+    )
+
+    # Cache results in needed order
+    lens_cache: dict[str, LensResult] = {}
+    for lens_name in needed:
+        if lens_name in parallel_results:
+            result = parallel_results[lens_name]
             lens_cache[lens_name] = result
             results.add(result)
-            logger.info("Lens '%s' completed: %s", lens_name, result.summary[:100])
-        except Exception as e:
-            logger.error("Lens '%s' failed: %s", lens_name, e, exc_info=True)
-            error_result = LensResult(
-                lens_name=lens.name,
-                title=lens.title,
-                summary=f"Analysis failed: {e}",
-            )
-            lens_cache[lens_name] = error_result
-            results.add(error_result)
+            logger.info("Lens '%s' done: %s", lens_name, result.summary[:100])
 
     # Organize results into per-flow buckets
     for flow in flows:

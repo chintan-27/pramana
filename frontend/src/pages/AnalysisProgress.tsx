@@ -161,6 +161,28 @@ export default function AnalysisProgress() {
                     {String(progress.papers_passed)} passed &middot; {String(progress.papers_screened_out ?? 0)} filtered
                   </p>
                 )}
+                {isActive && stage.key === 'extraction' && progress.current_paper != null && (
+                  <div className="mt-1.5 space-y-1">
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-1 bg-line rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-amber rounded-full transition-all duration-300"
+                          style={{
+                            width: progress.papers_total
+                              ? `${Math.round(((progress.papers_processed as number) / (progress.papers_total as number)) * 100)}%`
+                              : '0%'
+                          }}
+                        />
+                      </div>
+                      <span className="text-[10px] font-mono text-cream-faint shrink-0">
+                        {String(progress.papers_processed ?? 0)}/{String(progress.papers_total ?? '?')}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-amber/70 font-mono truncate">
+                      {String(progress.current_paper)}
+                    </p>
+                  </div>
+                )}
                 {isDone && stage.key === 'extraction' && progress.facts_extracted != null && (
                   <p className="text-[11px] text-cream-faint font-mono mt-1">
                     {String(progress.facts_extracted)} facts from {String(progress.papers_processed ?? '?')} papers

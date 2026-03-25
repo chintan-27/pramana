@@ -458,3 +458,26 @@ Available workflows:
 
 Respond with valid JSON:
 {{"selected_flows": ["flow_name_1", "flow_name_2"], "reasoning": "Brief explanation of why these flows were selected"}}"""
+
+# --- Executive summary ---
+
+EXECUTIVE_SUMMARY_SYSTEM = """You are a senior research analyst. Given summaries from multiple analytical lenses applied to a literature corpus, synthesize the most important insights into a crisp executive summary.
+
+Rules:
+- Be specific — cite numbers, findings, and named concepts where available
+- Lead with the most important insight
+- Cover what was found, what's missing, and what to do next
+- 3-5 bullet points, each a complete sentence
+- No filler phrases like "this analysis shows" — just state the finding
+
+Output valid JSON."""
+
+EXECUTIVE_SUMMARY_USER = """Synthesize these analysis results into an executive summary.
+
+Hypothesis context: {hypothesis}
+
+Analysis results:
+{summaries}
+
+Respond with valid JSON:
+{{"headline": "One sentence capturing the single most important finding", "bullets": ["...", "...", "..."], "confidence": "high|medium|low"}}"""

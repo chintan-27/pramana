@@ -1,6 +1,6 @@
 import { type ReactNode, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { Report, FlowResult } from '../api/client';
+import type { Report, FlowResult, ExecutiveSummary } from '../api/client';
 import { useTheme } from '../theme';
 import ReportChat from './ReportChat';
 import {
@@ -77,6 +77,11 @@ export default function ReportViewerDisplay({ report, error, runId }: Props) {
           </p>
         ) : null}
       </div>
+
+      {/* ── Executive Summary ── */}
+      {report.executive_summary?.headline && (
+        <ExecSummary es={report.executive_summary} />
+      )}
 
       {/* ── At a Glance ── */}
       <Sec>
@@ -413,6 +418,42 @@ export default function ReportViewerDisplay({ report, error, runId }: Props) {
         <ReportChat runId={runId} />
       </div>
     )}
+    </div>
+  );
+}
+
+/* ════ Executive Summary ════ */
+
+function ExecSummary({ es }: { es: ExecutiveSummary }) {
+  const confColor = es.confidence === 'high' ? 'text-teal' : es.confidence === 'medium' ? 'text-amber' : 'text-cream-muted';
+  return (
+    <div className="mb-10 relative rounded-xl overflow-hidden border border-amber/20">
+      <div className="absolute inset-0 bg-gradient-to-br from-amber/6 via-transparent to-transparent pointer-events-none" />
+      <div className="relative px-6 py-5">
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <p className="text-[10px] font-mono text-amber tracking-[0.2em] uppercase">Summary</p>
+          {es.confidence && (
+            <span className={`text-[9px] font-mono tracking-wider ${confColor}`}>
+              {es.confidence} confidence
+            </span>
+          )}
+        </div>
+        <p className="text-[17px] font-display font-400 text-cream leading-snug mb-5">
+          {es.headline}
+        </p>
+        {es.bullets?.length > 0 && (
+          <ul className="space-y-2.5">
+            {es.bullets.map((b, i) => (
+              <li key={i} className="flex items-start gap-3">
+                <span className="shrink-0 w-5 h-5 rounded-md bg-amber/15 border border-amber/20 flex items-center justify-center text-[9px] font-mono text-amber mt-0.5">
+                  {i + 1}
+                </span>
+                <p className="text-[14px] text-cream-dim leading-relaxed">{b}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
