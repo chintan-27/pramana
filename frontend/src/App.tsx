@@ -5,6 +5,8 @@ import ReportViewer from './pages/ReportViewer';
 import SavedReportViewer from './pages/SavedReportViewer';
 import EvidenceExplorer from './pages/EvidenceExplorer';
 import ReportHistory from './pages/ReportHistory';
+import ConfirmHypothesis from './pages/ConfirmHypothesis';
+import PaperCuration from './pages/PaperCuration';
 import { ThemeProvider, useTheme } from './theme';
 import './index.css';
 
@@ -78,6 +80,8 @@ function AppShell() {
         <Routes>
           <Route path="/" element={<HypothesisInput />} />
           <Route path="/analysis/:runId" element={<AnalysisProgress />} />
+          <Route path="/confirm/:runId" element={<ConfirmHypothesis />} />
+          <Route path="/curate/:runId" element={<PaperCuration />} />
           <Route path="/report/db/:runId" element={<SavedReportViewer />} />
           <Route path="/report/:runId" element={<ReportViewer />} />
           <Route path="/evidence" element={<EvidenceExplorer />} />

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import threading
 import traceback
 import uuid
 from contextlib import asynccontextmanager
@@ -255,6 +256,11 @@ async def start_analysis(request: AnalyzeRequest, background_tasks: BackgroundTa
         "progress": {},
         "result": None,
         "error": None,
+        # Human-in-the-loop pause points
+        "_confirm_event": threading.Event(),   # unblocked by confirm-hypothesis endpoint
+        "_curate_event": threading.Event(),    # unblocked by confirm-corpus endpoint
+        "parsed_query": None,                  # set after stage 1 pause
+        "corpus_papers": None,                 # set after stage 3 pause
     }
 
     background_tasks.add_task(_run_analysis, run_id)
@@ -298,7 +304,8 @@ async def stream_analysis_progress(run_id: str):
             })
             yield f"data: {payload}\n\n"
 
-            if store["status"] in ("completed", "failed"):
+            if store["status"] in ("completed", "failed",
+                                    "awaiting_confirmation", "awaiting_curation"):
                 break
             await asyncio.sleep(0.5)
 
@@ -691,8 +698,137 @@ async def export_report(run_id: int, format: str = "bibtex"):
                 },
             )
 
+        elif format == "docx":
+            if not run.results:
+                raise HTTPException(400, "Report not yet completed")
+            from docx import Document
+            from starlette.responses import Response as StarResponse
+
+            report_data = json.loads(run.results)
+            doc = Document()
+            doc.add_heading("Pramana Research Analysis Report", 0)
+            hyp = report_data.get("hypothesis", {})
+            if hyp.get("topics"):
+                doc.add_paragraph(f"Topics: {', '.join(hyp['topics'])}")
+            if hyp.get("domains"):
+                doc.add_paragraph(f"Domains: {', '.join(hyp['domains'])}")
+            doc.add_paragraph("")
+            exec_sum = report_data.get("executive_summary", {})
+            if isinstance(exec_sum, dict) and exec_sum.get("headline"):
+                doc.add_heading("Executive Summary", 1)
+                doc.add_paragraph(exec_sum["headline"]).runs[0].bold = True
+                for bullet in exec_sum.get("bullets", []):
+                    doc.add_paragraph(bullet, style="List Bullet")
+            for lr in report_data.get("lens_results", []):
+                doc.add_heading(lr.get("title", lr.get("lens", "")), 2)
+                doc.add_paragraph(lr.get("summary", "")).runs[0].italic = True
+                content = lr.get("content", {})
+                if lr.get("lens") == "gap_discovery":
+                    for gap in content.get("gaps", []):
+                        p = doc.add_paragraph(style="List Bullet")
+                        run = p.add_run(f"[{gap.get('severity','?')}] ")
+                        run.bold = True
+                        p.add_run(gap.get("description", ""))
+                elif lr.get("lens") == "lit_review":
+                    doc.add_paragraph(content.get("draft", ""))
+                elif lr.get("lens") == "research_proposal":
+                    for section in ["background", "gap_statement", "methodology"]:
+                        val = content.get(section, "")
+                        if val:
+                            doc.add_heading(section.replace("_", " ").title(), 3)
+                            doc.add_paragraph(val)
+            import io
+            buf = io.BytesIO()
+            doc.save(buf)
+            buf.seek(0)
+            return StarResponse(
+                content=buf.read(),
+                media_type=(
+                    "application/vnd.openxmlformats-officedocument"
+                    ".wordprocessingml.document"
+                ),
+                headers={
+                    "Content-Disposition": (
+                        f"attachment; filename=pramana_{run_id}_report.docx"
+                    )
+                },
+            )
+
         else:
-            raise HTTPException(400, "format must be 'bibtex', 'csv', or 'markdown'")
+            raise HTTPException(400, "format must be 'bibtex', 'csv', 'markdown', or 'docx'")
+
+
+# --- Human-in-the-loop pause endpoints ---
+
+@app.get("/api/analyze/{run_id}/parsed-query")
+async def get_parsed_query(run_id: str):
+    """Get the parsed hypothesis query after stage 1 (hypothesis confirmation)."""
+    if run_id not in _analysis_store:
+        raise HTTPException(404, "Analysis run not found")
+    store = _analysis_store[run_id]
+    if store.get("parsed_query") is None:
+        raise HTTPException(400, "Parsed query not yet available")
+    return {"run_id": run_id, "status": store["status"], "parsed_query": store["parsed_query"]}
+
+
+class ConfirmHypothesisRequest(BaseModel):
+    domains: list[str] | None = None
+    topics: list[str] | None = None
+    search_queries: list[str] | None = None
+
+
+@app.post("/api/analyze/{run_id}/confirm-hypothesis")
+async def confirm_hypothesis(run_id: str, request: ConfirmHypothesisRequest):
+    """Confirm or edit the parsed hypothesis to unblock the pipeline."""
+    if run_id not in _analysis_store:
+        raise HTTPException(404, "Analysis run not found")
+    store = _analysis_store[run_id]
+    if store["status"] != "awaiting_confirmation":
+        raise HTTPException(400, f"Run is not awaiting confirmation (status={store['status']})")
+    # Apply edits if provided
+    pq = store["parsed_query"]
+    if request.domains is not None:
+        pq["domains"] = request.domains
+    if request.topics is not None:
+        pq["topics"] = request.topics
+    if request.search_queries is not None:
+        pq["search_queries"] = request.search_queries
+    store["parsed_query"] = pq
+    store["_confirm_edits"] = pq  # pipeline reads this
+    store["_confirm_event"].set()
+    return {"ok": True}
+
+
+@app.get("/api/analyze/{run_id}/corpus-papers")
+async def get_corpus_papers(run_id: str):
+    """Get the paper list after screening (paper curation step)."""
+    if run_id not in _analysis_store:
+        raise HTTPException(404, "Analysis run not found")
+    store = _analysis_store[run_id]
+    if store.get("corpus_papers") is None:
+        raise HTTPException(400, "Corpus papers not yet available")
+    return {
+        "run_id": run_id,
+        "status": store["status"],
+        "papers": store["corpus_papers"],
+    }
+
+
+class ConfirmCorpusRequest(BaseModel):
+    excluded_ids: list[int] = []  # db_id values of papers to exclude
+
+
+@app.post("/api/analyze/{run_id}/confirm-corpus")
+async def confirm_corpus(run_id: str, request: ConfirmCorpusRequest):
+    """Confirm paper selection and unblock the pipeline for extraction."""
+    if run_id not in _analysis_store:
+        raise HTTPException(404, "Analysis run not found")
+    store = _analysis_store[run_id]
+    if store["status"] != "awaiting_curation":
+        raise HTTPException(400, f"Run is not awaiting curation (status={store['status']})")
+    store["_excluded_paper_ids"] = set(request.excluded_ids)
+    store["_curate_event"].set()
+    return {"ok": True, "excluded": len(request.excluded_ids)}
 
 
 def _bibtex_key(authors: list[str], year: int | None, title: str) -> str:
@@ -766,6 +902,21 @@ def _run_analysis(run_id: str) -> None:
         logger.info("[%s] Parsed → %d domains, %d topics, %d queries",
                     run_id[:8], len(parsed.domains), len(parsed.topics), len(parsed.search_queries))
 
+        # Pause 1: Hypothesis confirmation (5 min timeout → auto-continue)
+        store["parsed_query"] = parsed.model_dump()
+        store["status"] = "awaiting_confirmation"
+        store["stage"] = "awaiting_confirmation"
+        logger.info("[%s] Paused for hypothesis confirmation", run_id[:8])
+        store["_confirm_event"].wait(timeout=300)
+        store["status"] = "running"
+        # Apply any edits the user made
+        edits = store.get("_confirm_edits")
+        if edits:
+            parsed.domains = edits.get("domains", parsed.domains)
+            parsed.topics = edits.get("topics", parsed.topics)
+            parsed.search_queries = edits.get("search_queries", parsed.search_queries)
+            logger.info("[%s] Hypothesis updated by user", run_id[:8])
+
         # Stage 2: Build corpus
         store["stage"] = "retrieval"
         store["progress"] = {"step": 2, "total": 7, "description": "Retrieving papers"}
@@ -799,6 +950,37 @@ def _run_analysis(run_id: str) -> None:
             "[%s] Screening: %d passed, %d filtered",
             run_id[:8], passed_count, screened_count,
         )
+
+        # Pause 2: Paper curation (10 min timeout → auto-continue)
+        store["corpus_papers"] = [
+            {
+                "db_id": p.get("db_id"),
+                "title": p.get("title", ""),
+                "authors": p.get("authors", [])[:3],
+                "year": p.get("year"),
+                "venue": p.get("venue", ""),
+                "source": p.get("source", "unknown"),
+                "screened_out": bool(p.get("screened_out")),
+                "screening_reason": p.get("screening_reason", ""),
+                "relevance_score": round(p.get("relevance_score", 0.0), 3),
+            }
+            for p in corpus.papers
+        ]
+        store["status"] = "awaiting_curation"
+        store["stage"] = "awaiting_curation"
+        logger.info("[%s] Paused for paper curation", run_id[:8])
+        store["_curate_event"].wait(timeout=600)
+        store["status"] = "running"
+        # Apply user exclusions
+        excluded_ids = store.get("_excluded_paper_ids", set())
+        if excluded_ids:
+            for p in corpus.papers:
+                if p.get("db_id") in excluded_ids:
+                    p["screened_out"] = True
+                    p["screening_reason"] = "Excluded by user"
+            removed = sum(1 for p in corpus.papers if p.get("db_id") in excluded_ids)
+            logger.info("[%s] User excluded %d papers", run_id[:8], removed)
+        passed_count = sum(1 for p in corpus.papers if not p.get("screened_out"))
 
         # Stage 4: Extract evidence
         store["stage"] = "extraction"

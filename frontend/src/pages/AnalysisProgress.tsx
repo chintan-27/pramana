@@ -29,8 +29,13 @@ export default function AnalysisProgress() {
         if (data.status === 'completed') {
           es.close();
           navigate(`/report/${runId}`);
-        }
-        if (data.status === 'failed') {
+        } else if (data.status === 'awaiting_confirmation') {
+          es.close();
+          navigate(`/confirm/${runId}`);
+        } else if (data.status === 'awaiting_curation') {
+          es.close();
+          navigate(`/curate/${runId}`);
+        } else if (data.status === 'failed') {
           es.close();
           setError(data.error || 'Analysis failed');
         }

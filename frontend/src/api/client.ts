@@ -194,6 +194,65 @@ export async function uploadPdf(file: File): Promise<PdfUploadResult> {
   return res.json();
 }
 
+// --- Human-in-the-loop endpoints ---
+
+export interface ParsedQuery {
+  domains: string[];
+  topics: string[];
+  methods: string[];
+  search_queries: string[];
+  pico?: { population: string; intervention: string; comparison: string; outcome: string };
+}
+
+export interface CorpusPaper {
+  db_id: number;
+  title: string;
+  authors: string[];
+  year: number | null;
+  venue: string;
+  source: 's2' | 'arxiv' | 'pubmed' | 'crossref' | 'pdf' | 'unknown';
+  screened_out: boolean;
+  screening_reason: string;
+  relevance_score: number;
+}
+
+export async function getParsedQuery(runId: string): Promise<{ parsed_query: ParsedQuery; status: string }> {
+  const res = await fetch(`${BASE_URL}/analyze/${runId}/parsed-query`);
+  if (!res.ok) throw new Error(`Failed to get parsed query: ${res.statusText}`);
+  return res.json();
+}
+
+export async function confirmHypothesis(
+  runId: string,
+  edits: Partial<Pick<ParsedQuery, 'domains' | 'topics' | 'search_queries'>>,
+): Promise<void> {
+  const res = await fetch(`${BASE_URL}/analyze/${runId}/confirm-hypothesis`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(edits),
+  });
+  if (!res.ok) throw new Error(`Failed to confirm hypothesis: ${res.statusText}`);
+}
+
+export async function getCorpusPapers(runId: string): Promise<{ papers: CorpusPaper[] }> {
+  const res = await fetch(`${BASE_URL}/analyze/${runId}/corpus-papers`);
+  if (!res.ok) throw new Error(`Failed to get corpus papers: ${res.statusText}`);
+  return res.json();
+}
+
+export async function confirmCorpus(runId: string, excludedIds: number[]): Promise<void> {
+  const res = await fetch(`${BASE_URL}/analyze/${runId}/confirm-corpus`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ excluded_ids: excludedIds }),
+  });
+  if (!res.ok) throw new Error(`Failed to confirm corpus: ${res.statusText}`);
+}
+
+export function exportReport(runId: number, format: 'bibtex' | 'csv' | 'markdown' | 'docx'): void {
+  window.open(`${BASE_URL}/reports/${runId}/export?format=${format}`, '_blank');
+}
+
 export function streamAnalysisProgress(
   runId: string,
   onEvent: (data: RunStatus) => void,

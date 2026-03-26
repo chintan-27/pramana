@@ -50,6 +50,8 @@ def build_corpus(
             s2_papers = semantic_scholar.search_papers(
                 search_query, settings, limit=per_source, year_range=query.time_range,
             )
+            for p in s2_papers:
+                p.setdefault("source", "s2")
             corpus.total_from_s2 += len(s2_papers)
             all_papers.extend(s2_papers)
         except Exception as e:
@@ -58,6 +60,8 @@ def build_corpus(
         # arXiv
         try:
             arxiv_papers = arxiv.search_papers(search_query, max_results=per_source)
+            for p in arxiv_papers:
+                p.setdefault("source", "arxiv")
             corpus.total_from_arxiv += len(arxiv_papers)
             all_papers.extend(arxiv_papers)
         except Exception as e:
@@ -66,6 +70,8 @@ def build_corpus(
         # PubMed
         try:
             pm_papers = pubmed.search_papers(search_query, settings, max_results=per_source)
+            for p in pm_papers:
+                p.setdefault("source", "pubmed")
             corpus.total_from_pubmed += len(pm_papers)
             all_papers.extend(pm_papers)
         except Exception as e:
@@ -74,6 +80,8 @@ def build_corpus(
         # CrossRef
         try:
             cr_papers = crossref.search_papers(search_query, max_results=per_source)
+            for p in cr_papers:
+                p.setdefault("source", "crossref")
             corpus.total_from_crossref += len(cr_papers)
             all_papers.extend(cr_papers)
         except Exception as e:
