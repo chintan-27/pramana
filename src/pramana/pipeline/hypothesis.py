@@ -31,6 +31,7 @@ class HypothesisQuery(BaseModel):
     pico: PICOComponents = PICOComponents()
     declared_domain: str = ""  # User-declared domain (e.g., "Computer Science", "Economics")
     prior_research: str = ""  # Stored prior research text for lenses that need it
+    hypothesis_text: str = ""  # Original raw hypothesis input from the user
 
 
 def parse_hypothesis(

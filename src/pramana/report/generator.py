@@ -24,6 +24,7 @@ def _generate_json(results: AnalysisResults, query: HypothesisQuery) -> str:
     """Generate JSON report."""
     report: dict = {
         "hypothesis": {
+            "text": query.hypothesis_text,
             "domains": query.domains,
             "topics": query.topics,
             "methods": query.methods,

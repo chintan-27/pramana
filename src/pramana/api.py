@@ -17,7 +17,7 @@ from starlette.responses import StreamingResponse
 from pramana.config import get_settings
 from pramana.llm.sanitize import sanitize_user_input
 from pramana.models.database import create_tables, get_engine, get_session, seed_venues
-from pramana.models.schema import AnalysisRun, ExpertFeedback, Hypothesis, Paper
+from pramana.models.schema import AnalysisRun, Annotation, ExpertFeedback, Hypothesis, Paper
 from pramana.models.schema import ExtractedFact as ExtractedFactDB
 from pramana.models.vectors import get_chroma_client, get_evidence_collection, search_evidence
 
@@ -831,6 +831,259 @@ async def confirm_corpus(run_id: str, request: ConfirmCorpusRequest):
     return {"ok": True, "excluded": len(request.excluded_ids)}
 
 
+# --- Batch I: Annotations, re-run lens, follow-up search ---
+
+class AnnotationRequest(BaseModel):
+    content_ref: str   # e.g. "gap:0", "finding:3", "lens:lit_review"
+    note: str = ""
+
+
+@app.post("/api/reports/{run_id}/annotations")
+async def create_annotation(run_id: str, request: AnnotationRequest):
+    """Bookmark/annotate a finding, gap, or lens result."""
+    settings = get_settings()
+    with get_session(settings) as session:
+        ann = Annotation(run_id=run_id, content_ref=request.content_ref, note=request.note)
+        session.add(ann)
+        session.flush()
+        created_at = ann.created_at.isoformat() if ann.created_at else ""
+        return {"id": ann.id, "run_id": run_id, "content_ref": ann.content_ref,
+                "note": ann.note, "created_at": created_at}
+
+
+@app.get("/api/reports/{run_id}/annotations")
+async def list_annotations(run_id: str):
+    """List all annotations for a run."""
+    settings = get_settings()
+    with get_session(settings) as session:
+        anns = session.query(Annotation).filter(Annotation.run_id == run_id).all()
+        return {"annotations": [
+            {"id": a.id, "content_ref": a.content_ref, "note": a.note,
+             "created_at": a.created_at.isoformat() if a.created_at else ""}
+            for a in anns
+        ]}
+
+
+@app.delete("/api/reports/{run_id}/annotations/{ann_id}")
+async def delete_annotation(run_id: str, ann_id: int):
+    """Delete an annotation."""
+    settings = get_settings()
+    with get_session(settings) as session:
+        ann = session.get(Annotation, ann_id)
+        if not ann or ann.run_id != run_id:
+            raise HTTPException(404, "Annotation not found")
+        session.delete(ann)
+        return {"ok": True}
+
+
+class RerunLensRequest(BaseModel):
+    lens_name: str
+
+
+@app.post("/api/analyze/{run_id}/rerun-lens")
+async def rerun_lens(run_id: str, request: RerunLensRequest):
+    """Re-run a single lens on the existing corpus/evidence without re-extraction."""
+    if run_id not in _analysis_store:
+        raise HTTPException(404, "Analysis run not found")
+    store = _analysis_store[run_id]
+    if store["status"] != "completed":
+        raise HTTPException(400, "Run must be completed to re-run a lens")
+
+    settings = get_settings()
+    from pramana.pipeline.hypothesis import HypothesisQuery
+
+    # Reconstruct query from stored report
+    report_data = store["result"]
+    hyp_data = report_data.get("hypothesis", {})
+    query = HypothesisQuery(**{k: v for k, v in hyp_data.items()
+                               if k in HypothesisQuery.model_fields})
+
+    # Re-run the lens using the stored corpus
+    from pramana.pipeline.orchestrator import _LENS_BY_NAME
+    lens = _LENS_BY_NAME.get(request.lens_name)
+    if lens is None:
+        raise HTTPException(404, f"Unknown lens: {request.lens_name}")
+
+    # We don't have corpus/evidence objects in memory after completion.
+    # Rebuild a minimal NormalizedEvidence from DB facts.
+    from pramana.pipeline.corpus import Corpus
+    from pramana.pipeline.extraction import ExtractedFact
+    from pramana.pipeline.normalization import NormalizedEvidence
+
+    with get_session(settings) as session:
+        db_papers = (
+            session.query(Paper)
+            .join(ExtractedFactDB, ExtractedFactDB.paper_id == Paper.id)
+            .distinct().all()
+        )
+        db_facts = session.query(ExtractedFactDB).all()
+
+        corpus_papers = []
+        for p in db_papers:
+            authors = json.loads(p.authors) if p.authors else []
+            corpus_papers.append({
+                "db_id": p.id, "title": p.title, "authors": authors,
+                "year": p.year, "venue": p.venue or "", "abstract": p.abstract or "",
+            })
+
+        facts = [
+            ExtractedFact(
+                fact_type=f.fact_type, content=f.content,
+                direct_quote=f.direct_quote, location=f.location,
+                paper_id=f.paper_id, confidence=f.confidence or 0.0,
+            )
+            for f in db_facts
+        ]
+
+    corpus = Corpus(papers=corpus_papers)
+    evidence = NormalizedEvidence(facts=facts)
+
+    try:
+        result = lens.analyze(corpus, evidence, query, settings)
+    except Exception as e:
+        raise HTTPException(500, f"Lens re-run failed: {e}")
+
+    # Patch the stored result
+    new_lr = {"lens": result.lens_name, "title": result.title,
+               "summary": result.summary, "content": result.content}
+    updated = False
+    for i, lr in enumerate(store["result"]["lens_results"]):
+        if lr["lens"] == request.lens_name:
+            store["result"]["lens_results"][i] = new_lr
+            updated = True
+            break
+    if not updated:
+        store["result"]["lens_results"].append(new_lr)
+
+    return new_lr
+
+
+class SearchMoreRequest(BaseModel):
+    query: str
+    max_papers: int = 10
+
+
+@app.post("/api/analyze/{run_id}/search-more")
+async def search_more_papers(run_id: str, request: SearchMoreRequest):
+    """Fetch additional papers for a follow-up query and add to the run's evidence."""
+    if run_id not in _analysis_store:
+        raise HTTPException(404, "Analysis run not found")
+    store = _analysis_store[run_id]
+    if store["status"] != "completed":
+        raise HTTPException(400, "Run must be completed to search for more papers")
+
+    settings = get_settings()
+    from pramana.pipeline.corpus import build_corpus
+    from pramana.pipeline.extraction import extract_all_evidence
+    from pramana.pipeline.hypothesis import parse_hypothesis
+
+    # Parse the follow-up query as a mini hypothesis
+    mini_query = parse_hypothesis(request.query, "new", settings)
+    mini_query.search_queries = [request.query]  # keep it simple, single direct query
+
+    # Fetch small corpus
+    new_corpus = build_corpus(mini_query, max_papers=request.max_papers, settings=settings)
+    added = len([p for p in new_corpus.papers if not p.get("screened_out")])
+
+    if added == 0:
+        return {"added_papers": 0, "message": "No new papers found"}
+
+    # Extract evidence
+    new_facts = extract_all_evidence(new_corpus, mini_query, settings)
+
+    # Update paper count in stored report
+    report_data = store["result"]
+    for lr in report_data.get("lens_results", []):
+        if lr.get("lens") == "evidence_table":
+            c = lr.get("content", {})
+            c["papers_with_evidence"] = c.get("papers_with_evidence", 0) + added
+            c["total_facts"] = c.get("total_facts", 0) + len(new_facts)
+            break
+
+    return {"added_papers": added, "new_facts": len(new_facts),
+            "message": f"Added {added} papers with {len(new_facts)} new facts"}
+
+
+# --- Batch J: Onboarding / Explore endpoints ---
+
+class ExploreFieldRequest(BaseModel):
+    field: str
+
+
+class BuildHypothesisRequest(BaseModel):
+    population: str
+    intervention: str
+    comparison: str = ""
+    outcome: str
+    domain: str = ""
+
+
+class SuggestHypothesesRequest(BaseModel):
+    field: str
+    selected_titles: list[str]
+
+
+@app.post("/api/explore/sample-papers")
+async def explore_sample_papers(request: ExploreFieldRequest):
+    """Fetch a handful of representative papers for a field to help users explore."""
+    settings = get_settings()
+    from pramana.pipeline.corpus import build_corpus
+    from pramana.pipeline.hypothesis import parse_hypothesis
+    mini_query = parse_hypothesis(request.field, "new", settings)
+    mini_query.search_queries = [request.field]
+    corpus = build_corpus(mini_query, max_papers=8, settings=settings)
+    papers = [
+        {"title": p.get("title", ""), "abstract": (p.get("abstract") or "")[:300],
+         "year": p.get("year")}
+        for p in corpus.papers[:8] if not p.get("screened_out")
+    ]
+    return {"papers": papers}
+
+
+@app.post("/api/explore/suggest-hypotheses")
+async def explore_suggest_hypotheses(request: SuggestHypothesesRequest):
+    """Suggest research hypotheses based on a field and selected papers."""
+    settings = get_settings()
+    from pramana.llm.client import call_llm
+    from pramana.llm.prompts import SUGGEST_HYPOTHESES
+    titles_text = "\n".join(f"- {t}" for t in request.selected_titles)
+    prompt = SUGGEST_HYPOTHESES.format(field=request.field, paper_titles=titles_text)
+    raw = call_llm(
+        system="You are a research methodology expert.",
+        user=prompt,
+        settings=settings,
+    )
+    import json as _json
+    try:
+        data = _json.loads(raw)
+        return {"hypotheses": data.get("hypotheses", [])}
+    except Exception:
+        return {"hypotheses": [raw]}
+
+
+@app.post("/api/explore/build-hypothesis")
+async def explore_build_hypothesis(request: BuildHypothesisRequest):
+    """Compose a hypothesis from PICO components."""
+    settings = get_settings()
+    import json as _json
+
+    from pramana.llm.client import call_llm
+    from pramana.llm.prompts import PICO_TO_HYPOTHESIS
+    prompt = PICO_TO_HYPOTHESIS.format(
+        population=request.population,
+        intervention=request.intervention,
+        comparison=request.comparison or "none specified",
+        outcome=request.outcome,
+        domain=request.domain or "not specified",
+    )
+    raw = call_llm(system="You are a research methodology expert.", user=prompt, settings=settings)
+    try:
+        data = _json.loads(raw)
+        return {"hypothesis": data.get("hypothesis", raw)}
+    except Exception:
+        return {"hypothesis": raw}
+
+
 def _bibtex_key(authors: list[str], year: int | None, title: str) -> str:
     """Generate a BibTeX citation key."""
     import re
@@ -898,6 +1151,7 @@ def _run_analysis(run_id: str) -> None:
             prior_research=store.get("prior_research", ""),
             declared_domain=store.get("domain", ""),
         )
+        parsed.hypothesis_text = store["hypothesis"]
         store["progress"]["parsed"] = parsed.model_dump()
         logger.info("[%s] Parsed → %d domains, %d topics, %d queries",
                     run_id[:8], len(parsed.domains), len(parsed.topics), len(parsed.search_queries))

@@ -1,6 +1,10 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import type { Report, FlowResult, ExecutiveSummary } from '../api/client';
+import type { Report, FlowResult, ExecutiveSummary, Annotation } from '../api/client';
+import {
+  createAnnotation, deleteAnnotation, getAnnotations,
+  rerunLens, searchMore, exportReport,
+} from '../api/client';
 import { useTheme } from '../theme';
 import ReportChat from './ReportChat';
 import {
@@ -37,6 +41,66 @@ export default function ReportViewerDisplay({ report, error, runId }: Props) {
   const { theme } = useTheme();
   const C = theme === 'dark' ? DARK : LIGHT;
 
+  const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [rerunningFlow, setRerunningFlow] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [searchMsg, setSearchMsg] = useState('');
+  const [annOpen, setAnnOpen] = useState(false);
+
+  useEffect(() => {
+    if (!runId) return;
+    getAnnotations(runId).then(({ annotations: ann }) => {
+      setAnnotations(ann);
+      setBookmarks(new Set(ann.map((a) => a.content_ref)));
+    }).catch(() => {});
+  }, [runId]);
+
+  const toggleBookmark = useCallback(async (contentRef: string) => {
+    if (!runId) return;
+    if (bookmarks.has(contentRef)) {
+      const ann = annotations.find((a) => a.content_ref === contentRef);
+      if (ann) {
+        await deleteAnnotation(runId, ann.id).catch(() => {});
+        setBookmarks((prev) => { const n = new Set(prev); n.delete(contentRef); return n; });
+        setAnnotations((prev) => prev.filter((a) => a.id !== ann.id));
+      }
+    } else {
+      const created = await createAnnotation(runId, contentRef).catch(() => null);
+      if (created) {
+        setBookmarks((prev) => new Set([...prev, contentRef]));
+        setAnnotations((prev) => [...prev, created]);
+      }
+    }
+  }, [runId, bookmarks, annotations]);
+
+  const handleRerun = useCallback(async (flowName: string) => {
+    if (!runId) return;
+    setRerunningFlow(flowName);
+    try {
+      await rerunLens(String(runId), flowName);
+      window.location.reload();
+    } finally {
+      setRerunningFlow(null);
+    }
+  }, [runId]);
+
+  const handleSearch = useCallback(async () => {
+    if (!runId || !searchQuery.trim()) return;
+    setSearching(true);
+    try {
+      const res = await searchMore(String(runId), searchQuery);
+      setSearchMsg(`Added ${res.added_papers} papers · ${res.new_facts} new findings`);
+      setSearchQuery('');
+      setTimeout(() => { setSearchMsg(''); window.location.reload(); }, 2500);
+    } catch {
+      setSearchMsg('Search failed — check the server.');
+    } finally {
+      setSearching(false);
+    }
+  }, [runId, searchQuery]);
+
   if (error) {
     return (
       <div className="max-w-3xl mx-auto pt-12">
@@ -58,20 +122,21 @@ export default function ReportViewerDisplay({ report, error, runId }: Props) {
   const s = getStats(report);
   const hyp = report.hypothesis as Record<string, string[] | string>;
 
+  const titleText = (hyp.text as string) ||
+    ((hyp.topics as string[])?.slice(0, 3).join(', ') || 'Research Report');
+
   return (
-    <div className="max-w-6xl mx-auto pt-8 pb-16 animate-fade-up lg:grid lg:grid-cols-[1fr_340px] lg:gap-8">
+    <div className="max-w-6xl mx-auto pt-8 pb-16 animate-fade-up overflow-x-hidden lg:grid lg:grid-cols-[1fr_340px] lg:gap-8">
     {/* Report column */}
-    <div>
+    <div className="min-w-0">
 
       {/* ── Title ── */}
       <div className="mb-10">
         <p className="text-[11px] font-mono text-amber tracking-[0.2em] uppercase mb-3">Report</p>
-        <h1 className="font-display text-[36px] sm:text-[44px] font-300 text-cream leading-[1.12] tracking-tight">
-          {hyp.topics
-            ? <>{(hyp.topics as string[]).join(', ')}</>
-            : 'Research Report'}
+        <h1 className="font-display text-[28px] sm:text-[36px] font-300 text-cream leading-[1.2] tracking-tight break-words">
+          {titleText.length > 120 ? titleText.slice(0, 120) + '…' : titleText}
         </h1>
-        {hyp.domains ? (
+        {hyp.domains && (hyp.domains as string[]).length > 0 ? (
           <p className="text-base text-cream-muted mt-3">
             in {(hyp.domains as string[]).join(' & ')}
           </p>
@@ -138,6 +203,10 @@ export default function ReportViewerDisplay({ report, error, runId }: Props) {
                   flowName={flowName}
                   fr={fr}
                   idx={idx}
+                  bookmarked={bookmarks.has(`flow:${flowName}`)}
+                  onBookmark={() => toggleBookmark(`flow:${flowName}`)}
+                  isRerunning={rerunningFlow === flowName}
+                  onRerun={runId ? () => handleRerun(flowName) : undefined}
                 />
               );
             })}
@@ -263,28 +332,13 @@ export default function ReportViewerDisplay({ report, error, runId }: Props) {
           )}
           <div className="space-y-2.5 stagger">
             {s.gaps.map((gap, i) => (
-              <div
+              <GapCard
                 key={i}
-                className={`p-4 rounded-lg border-l-[3px] ${
-                  gap.severity === 'high'
-                    ? 'border-l-rose bg-rose-subtle/50 border border-rose/10'
-                    : gap.severity === 'medium'
-                    ? 'border-l-amber bg-amber-subtle/50 border border-amber/10'
-                    : 'border-l-cream-faint bg-bg-card border border-line'
-                }`}
-              >
-                <div className="flex items-start gap-3">
-                  <span className={`shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-[11px] font-mono font-bold ${
-                    gap.severity === 'high' ? 'bg-rose/20 text-rose' :
-                    gap.severity === 'medium' ? 'bg-amber/20 text-amber' :
-                    'bg-bg-hover text-cream-muted'
-                  }`}>{i + 1}</span>
-                  <div>
-                    <p className="text-[15px] font-medium text-cream leading-snug">{gap.description}</p>
-                    <p className="text-sm text-cream-muted mt-1.5 leading-relaxed">{gap.evidence}</p>
-                  </div>
-                </div>
-              </div>
+                gap={gap}
+                idx={i}
+                bookmarked={bookmarks.has(`gap:${i}`)}
+                onBookmark={() => toggleBookmark(`gap:${i}`)}
+              />
             ))}
           </div>
           <Hint>
@@ -305,7 +359,16 @@ export default function ReportViewerDisplay({ report, error, runId }: Props) {
           <div className="space-y-3 stagger">
             {s.sampleFacts.map((f, i) => (
               <div key={i} className="p-4 bg-bg-card border border-line rounded-lg">
-                <p className="text-[15px] text-cream leading-relaxed mb-2">{f.content}</p>
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <p className="text-[15px] text-cream leading-relaxed">{f.content}</p>
+                  <button
+                    onClick={() => toggleBookmark(`finding:${i}`)}
+                    title={bookmarks.has(`finding:${i}`) ? 'Remove bookmark' : 'Bookmark'}
+                    className="shrink-0 text-[15px] text-cream-faint hover:text-amber transition-colors"
+                  >
+                    {bookmarks.has(`finding:${i}`) ? '★' : '☆'}
+                  </button>
+                </div>
                 <div className="quote-bar mb-2.5">
                   <p className="text-sm italic text-cream-muted leading-relaxed">
                     &ldquo;{f.direct_quote}&rdquo;
@@ -395,24 +458,95 @@ export default function ReportViewerDisplay({ report, error, runId }: Props) {
         </Sec>
       )}
 
+      {/* ── Follow-up Search ── */}
+      {runId && (
+        <Sec>
+          <SLabel>Find More Papers</SLabel>
+          <p className="text-sm text-cream-muted mb-3">Search for additional papers on a specific aspect:</p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSearch(); }}
+              placeholder="e.g. adversarial robustness in medical imaging"
+              className="flex-1 px-3 py-2 bg-bg-card border border-line rounded-lg text-sm text-cream placeholder:text-cream-faint focus:outline-none focus:border-amber/50"
+            />
+            <button
+              onClick={handleSearch}
+              disabled={searching || !searchQuery.trim()}
+              className="px-4 py-2 bg-amber text-bg text-sm font-medium rounded-lg hover:bg-amber-glow transition-colors disabled:opacity-40"
+            >
+              {searching ? '…' : 'Search'}
+            </button>
+          </div>
+          {searchMsg && (
+            <p className="mt-2 text-sm text-teal">{searchMsg}</p>
+          )}
+        </Sec>
+      )}
+
       {/* ── Footer ── */}
-      <div className="mt-14 pt-6 border-t border-line flex items-center justify-between">
-        <Link to="/evidence" className="text-sm font-medium text-amber hover:text-amber-glow transition-colors">
-          Explore Evidence
-        </Link>
-        <Link to="/" className="text-sm text-cream-muted hover:text-cream transition-colors">
-          New Analysis
-        </Link>
+      <div className="mt-14 pt-6 border-t border-line">
+        <div className="flex items-center justify-between mb-4">
+          <Link to="/evidence" className="text-sm font-medium text-amber hover:text-amber-glow transition-colors">
+            Explore Evidence
+          </Link>
+          <Link to="/" className="text-sm text-cream-muted hover:text-cream transition-colors">
+            New Analysis
+          </Link>
+        </div>
+        {runId && typeof runId === 'number' && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] font-mono text-cream-faint">Export:</span>
+            {(['bibtex', 'csv', 'markdown', 'docx'] as const).map((fmt) => (
+              <button
+                key={fmt}
+                onClick={() => exportReport(runId as number, fmt)}
+                className="text-[11px] font-mono px-2.5 py-1 rounded border border-line bg-bg-card text-cream-dim hover:text-cream hover:border-amber/30 transition-colors"
+              >
+                {fmt === 'bibtex' ? 'BibTeX' : fmt === 'docx' ? 'Word' : fmt.charAt(0).toUpperCase() + fmt.slice(1)}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
 
-    {/* Chat column */}
+    {/* Chat + annotations column */}
     {runId && (
-      <div className="hidden lg:block">
+      <div className="hidden lg:flex lg:flex-col lg:gap-4">
         <ReportChat runId={runId} />
+        {annotations.length > 0 && (
+          <div className="rounded-xl border border-line bg-bg-card overflow-hidden">
+            <button
+              onClick={() => setAnnOpen((v) => !v)}
+              className="w-full px-4 py-3 flex items-center justify-between text-[11px] font-mono text-cream-faint hover:text-cream transition-colors"
+            >
+              <span className="text-amber tracking-widest uppercase">Bookmarks ({annotations.length})</span>
+              <svg className={`w-3 h-3 transition-transform ${annOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {annOpen && (
+              <div className="border-t border-line divide-y divide-line/40">
+                {annotations.map((ann) => (
+                  <div key={ann.id} className="px-4 py-3 flex items-start justify-between gap-2">
+                    <p className="text-[12px] text-cream-dim font-mono">{ann.content_ref}</p>
+                    <button
+                      onClick={() => toggleBookmark(ann.content_ref)}
+                      className="shrink-0 text-cream-faint hover:text-rose transition-colors text-[13px]"
+                      title="Remove"
+                    >×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     )}
-    {/* Mobile chat (toggle button + drawer) */}
+    {/* Mobile chat */}
     {runId && (
       <div className="lg:hidden">
         <ReportChat runId={runId} />
@@ -739,6 +873,73 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+/* ════ Gap card ════ */
+
+function GapCard({ gap, idx, bookmarked, onBookmark }: { gap: Gap; idx: number; bookmarked: boolean; onBookmark: () => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const sd = gap.suggested_design;
+  const feasColor = sd?.feasibility === 'high' ? 'text-teal bg-teal/10 border-teal/25' :
+                    sd?.feasibility === 'medium' ? 'text-amber bg-amber/10 border-amber/25' :
+                    'text-cream-muted bg-bg-hover border-line';
+  return (
+    <div className={`rounded-lg border-l-[3px] ${
+      gap.severity === 'high'
+        ? 'border-l-rose bg-rose-subtle/50 border border-rose/10'
+        : gap.severity === 'medium'
+        ? 'border-l-amber bg-amber-subtle/50 border border-amber/10'
+        : 'border-l-cream-faint bg-bg-card border border-line'
+    }`}>
+      <div className="p-4">
+        <div className="flex items-start gap-3">
+          <span className={`shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-[11px] font-mono font-bold ${
+            gap.severity === 'high' ? 'bg-rose/20 text-rose' :
+            gap.severity === 'medium' ? 'bg-amber/20 text-amber' :
+            'bg-bg-hover text-cream-muted'
+          }`}>{idx + 1}</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-[15px] font-medium text-cream leading-snug">{gap.description}</p>
+            <p className="text-sm text-cream-muted mt-1.5 leading-relaxed">{gap.evidence}</p>
+          </div>
+          <button onClick={onBookmark} title="Bookmark" className="shrink-0 text-[15px] text-cream-faint hover:text-amber transition-colors">
+            {bookmarked ? '★' : '☆'}
+          </button>
+        </div>
+      </div>
+      {sd && (
+        <>
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="w-full px-4 py-2 flex items-center justify-between border-t border-line/40 text-[10px] font-mono text-cream-faint hover:text-cream transition-colors"
+          >
+            <span>Suggested study design</span>
+            <svg className={`w-3 h-3 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {expanded && (
+            <div className="px-4 pb-4 border-t border-line/40 pt-3 space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] font-mono text-cream-faint">Design:</span>
+                <span className="text-[11px] font-semibold text-cream">{sd.design_type}</span>
+                <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border capitalize ${feasColor}`}>
+                  {sd.feasibility} feasibility
+                </span>
+              </div>
+              {sd.key_variables?.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {sd.key_variables.map((v, i) => (
+                    <span key={i} className="text-[10px] px-2 py-0.5 rounded-full border border-line bg-bg-inset text-cream-faint">{v}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ════ Flow card ════ */
 
 const FLOW_META: Record<string, { color: string; accent: string; border: string; bg: string; icon: ReactNode }> = {
@@ -760,7 +961,17 @@ const FLOW_META: Record<string, { color: string; accent: string; border: string;
 
 const FLOW_META_DEFAULT = { color: 'amber', accent: 'text-amber', border: 'border-amber/25', bg: 'bg-amber/8', icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /> };
 
-function FlowCard({ flowName, fr, idx }: { flowName: string; fr: FlowResult; idx: number }) {
+interface FlowCardProps {
+  flowName: string;
+  fr: FlowResult;
+  idx: number;
+  bookmarked?: boolean;
+  onBookmark?: () => void;
+  isRerunning?: boolean;
+  onRerun?: () => void;
+}
+
+function FlowCard({ flowName, fr, idx, bookmarked, onBookmark, isRerunning, onRerun }: FlowCardProps) {
   const [open, setOpen] = useState(false);
   const meta = FLOW_META[flowName] ?? FLOW_META_DEFAULT;
   const topLens = fr.lens_results.find((r) => r.lens !== 'evidence_table') ?? fr.lens_results[0];
@@ -788,6 +999,25 @@ function FlowCard({ flowName, fr, idx }: { flowName: string; fr: FlowResult; idx
           <div className="flex-1 min-w-0">
             <p className={`text-[13px] font-semibold ${meta.accent} leading-snug`}>{fr.title}</p>
             <p className="text-[12px] text-cream-muted mt-0.5 leading-relaxed line-clamp-2">{fr.description}</p>
+          </div>
+
+          {/* Bookmark + Re-run buttons */}
+          <div className="shrink-0 flex items-center gap-1">
+            {onBookmark && (
+              <button onClick={onBookmark} title="Bookmark" className="text-[15px] text-cream-faint hover:text-amber transition-colors">
+                {bookmarked ? '★' : '☆'}
+              </button>
+            )}
+            {onRerun && (
+              <button
+                onClick={onRerun}
+                disabled={isRerunning}
+                title="Re-run this flow"
+                className="text-[11px] font-mono px-2 py-0.5 rounded border border-line bg-bg-card text-cream-faint hover:text-cream hover:border-amber/30 transition-colors disabled:opacity-40"
+              >
+                {isRerunning ? '…' : '↻'}
+              </button>
+            )}
           </div>
         </div>
 
@@ -880,7 +1110,8 @@ function Hint({ children }: { children: ReactNode }) {
 
 /* ════ Data extraction ════ */
 
-interface Gap { description: string; evidence: string; severity: string }
+interface SuggestedDesign { design_type: string; key_variables: string[]; feasibility: string }
+interface Gap { description: string; evidence: string; severity: string; suggested_design?: SuggestedDesign }
 interface Fact { content: string; direct_quote: string; paper_title: string; location: string; confidence?: number }
 interface InsightGroup { title: string; items: string[] }
 interface Direction { title: string; description: string }
@@ -918,7 +1149,14 @@ function getStats(report: Report): Stats {
       }
     }
     if (lr.lens === 'gap_discovery') {
-      for (const g of (c.gaps || []) as Array<Record<string, string>>) gaps.push({ description: g.description || '', evidence: g.evidence || '', severity: g.severity || 'low' });
+      for (const g of (c.gaps || []) as Array<Record<string, unknown>>) {
+        gaps.push({
+          description: (g.description as string) || '',
+          evidence: (g.evidence as string) || '',
+          severity: (g.severity as string) || 'low',
+          suggested_design: g.suggested_design as SuggestedDesign | undefined,
+        });
+      }
       totalGaps = gaps.length;
     }
     if (lr.lens === 'meta_analysis') {

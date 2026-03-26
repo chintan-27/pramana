@@ -24,7 +24,7 @@ def test_create_tables(settings):
     assert set(Base.metadata.tables.keys()) == {
         "hypotheses", "papers", "blogs", "blog_citations",
         "extracted_facts", "normalized_facts", "venues", "analysis_runs",
-        "expert_feedback",
+        "expert_feedback", "annotations",
     }
 
 

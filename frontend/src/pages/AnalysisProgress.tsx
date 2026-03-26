@@ -2,6 +2,27 @@ import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { streamAnalysisProgress, type RunStatus } from '../api/client';
 
+export const LENS_DESCRIPTIONS: Record<string, string> = {
+  lit_review: 'Writes a structured Related Work section with in-text citations.',
+  research_proposal: 'Generates a grant proposal outline with specific aims.',
+  peer_review: 'Reviews a draft against the literature for supported/unsupported claims.',
+  meta_analysis: 'Quantitative summary: frequencies, temporal trends, concentration patterns.',
+  systematic_review: 'PRISMA-style synthesis of evidence across the corpus.',
+  trend_analysis: 'Tracks how research practices and methods have evolved over time.',
+  domain_survey: 'Maps how the topic is approached across different research domains.',
+  gap_discovery: 'Identifies missing evidence, understudied populations, and blind spots.',
+  bias_audit: 'Detects reporting biases and methodological homogeneity in the corpus.',
+  contradiction_analysis: 'Finds where papers make opposing or incompatible claims.',
+  claim_verification: 'Checks whether a specific claim is supported, refuted, or mixed.',
+  knowledge_mapping: 'Builds cross-paper entity and relationship graph.',
+  research_planning: 'Suggests concrete next-step research directions.',
+  replication: 'Classifies findings as confirmed, challenged, or single-paper.',
+  evidence_table: 'Structured table of all extracted facts with direct quotes.',
+  bias_detection: 'Corpus-level bias patterns: dataset concentration, metric cherry-picking.',
+  knowledge_graph: 'Entity connections across papers: shared datasets, method lineages.',
+  trace_ancestry: 'Methodological ancestry: how techniques evolved from foundational work.',
+};
+
 const STAGES = [
   { key: 'parsing', label: 'Parsing hypothesis', sub: 'Extracting domains, topics, search queries', icon: '01' },
   { key: 'retrieval', label: 'Retrieving papers', sub: 'Semantic Scholar, arXiv, PubMed', icon: '02' },
@@ -204,7 +225,8 @@ export default function AnalysisProgress() {
                       {(progress.selected_flows as string[]).map((f) => (
                         <span
                           key={f}
-                          className="px-2 py-0.5 text-[10px] font-mono rounded border border-amber/30 bg-amber-subtle text-amber"
+                          title={LENS_DESCRIPTIONS[f] || f}
+                          className="px-2 py-0.5 text-[10px] font-mono rounded border border-amber/30 bg-amber-subtle text-amber cursor-help"
                         >
                           {f.replace(/_/g, ' ')}
                         </span>

@@ -90,7 +90,7 @@ Corpus stats:
 - Total papers: {total_papers}
 - Date range: {date_range}
 
-Respond with valid JSON: {{"gaps": [{{"description": "...", "evidence": "...", "severity": "...", "supporting_papers": [...]}}]}}"""
+Respond with valid JSON: {{"gaps": [{{"description": "...", "evidence": "...", "severity": "high|medium|low", "supporting_papers": [...], "suggested_design": {{"design_type": "RCT|survey|ablation|case_study|systematic_review|observational|simulation", "key_variables": ["..."], "feasibility": "high|medium|low"}}}}]}}"""
 
 META_ANALYSIS_SYSTEM = """You are a quantitative research synthesis expert. Given structured evidence from a corpus, produce meta-analytic summaries including frequency statistics, temporal trends, concentration patterns, and co-occurrence summaries.
 
@@ -481,3 +481,36 @@ Analysis results:
 
 Respond with valid JSON:
 {{"headline": "One sentence capturing the single most important finding", "bullets": ["...", "...", "..."], "confidence": "high|medium|low"}}"""
+
+# --- Batch J: Onboarding ---
+
+PICO_TO_HYPOTHESIS = """You are a research methodology expert. Given PICO (Population/Intervention/Comparison/Outcome) components, compose a concise, specific research hypothesis in 1-2 sentences.
+
+Rules:
+- State the hypothesis clearly and specifically
+- Include the core comparison if provided
+- Use domain-appropriate language
+- Do not add extra commentary — output only the hypothesis text
+
+Population: {population}
+Intervention: {intervention}
+Comparison: {comparison}
+Outcome: {outcome}
+Domain: {domain}
+
+Respond with valid JSON: {{"hypothesis": "..."}}"""
+
+SUGGEST_HYPOTHESES = """You are a research methodology expert. Given a field of study and a set of paper titles that the user found interesting, suggest 3 specific, testable research hypotheses.
+
+Rules:
+- Each hypothesis should be specific and testable
+- Ground suggestions in the provided paper titles
+- Cover different angles (methods, outcomes, populations)
+- Use concise academic language
+
+Field: {field}
+
+Interesting papers:
+{paper_titles}
+
+Respond with valid JSON: {{"hypotheses": ["...", "...", "..."]}}"""

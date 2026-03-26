@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { startAnalysis, uploadPdf, type PdfUploadResult } from '../api/client';
+import { startAnalysis, uploadPdf, buildHypothesis, exploreSamplePapers, suggestHypotheses, type PdfUploadResult } from '../api/client';
 
 const TYPES = [
   { value: 'new', label: 'New Research', desc: 'Starting a fresh investigation' },
@@ -22,7 +22,63 @@ export default function HypothesisInput() {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // PICO builder
+  const [showPico, setShowPico] = useState(false);
+  const [pico, setPico] = useState({ population: '', intervention: '', comparison: '', outcome: '', domain: '' });
+  const [picoLoading, setPicoLoading] = useState(false);
+
+  // Explore wizard
+  const [exploreMode, setExploreMode] = useState(false);
+  const [exploreStep, setExploreStep] = useState(1);
+  const [exploreField, setExploreField] = useState('');
+  const [explorePapers, setExplorePapers] = useState<Array<{ title: string; abstract: string; year: number | null }>>([]);
+  const [selectedTitles, setSelectedTitles] = useState<Set<string>>(new Set());
+  const [suggestedHyps, setSuggestedHyps] = useState<string[]>([]);
+  const [exploreLoading, setExploreLoading] = useState(false);
+
   const showPrior = type === 'related' || type === 'continuation';
+
+  const handlePicoGenerate = async () => {
+    if (!pico.population || !pico.intervention || !pico.outcome) return;
+    setPicoLoading(true);
+    try {
+      const { hypothesis: h } = await buildHypothesis(pico.population, pico.intervention, pico.comparison, pico.outcome, pico.domain);
+      setHypothesis(h);
+      setShowPico(false);
+    } catch { /* ignore */ } finally {
+      setPicoLoading(false);
+    }
+  };
+
+  const handleExploreFetch = async () => {
+    if (!exploreField.trim()) return;
+    setExploreLoading(true);
+    try {
+      const { papers } = await exploreSamplePapers(exploreField);
+      setExplorePapers(papers);
+      setExploreStep(2);
+    } catch { /* ignore */ } finally {
+      setExploreLoading(false);
+    }
+  };
+
+  const handleExploreSuggest = async () => {
+    if (selectedTitles.size === 0) return;
+    setExploreLoading(true);
+    try {
+      const { hypotheses } = await suggestHypotheses(exploreField, Array.from(selectedTitles));
+      setSuggestedHyps(hypotheses);
+      setExploreStep(3);
+    } catch { /* ignore */ } finally {
+      setExploreLoading(false);
+    }
+  };
+
+  const handleExploreSelect = (h: string) => {
+    setHypothesis(h);
+    setExploreMode(false);
+    setExploreStep(1);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,12 +142,118 @@ export default function HypothesisInput() {
         </p>
       </div>
 
+      {/* ── Explore wizard ── */}
+      {exploreMode && (
+        <div className="mb-8 rounded-xl border border-amber/20 bg-amber-subtle/30 overflow-hidden">
+          <div className="px-5 py-4 border-b border-amber/15 flex items-center justify-between">
+            <p className="text-[11px] font-mono text-amber tracking-widest uppercase">Explore a Field</p>
+            <button type="button" onClick={() => setExploreMode(false)} className="text-cream-faint hover:text-cream text-lg">×</button>
+          </div>
+
+          {exploreStep === 1 && (
+            <div className="p-5 space-y-3">
+              <p className="text-sm text-cream-muted">What area are you curious about?</p>
+              <input
+                type="text"
+                value={exploreField}
+                onChange={(e) => setExploreField(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleExploreFetch(); } }}
+                placeholder="e.g. AI in cancer imaging, antibiotic resistance, transformer interpretability"
+                className="w-full px-3 py-2.5 bg-bg-card border border-line rounded-lg text-sm text-cream placeholder:text-cream-faint focus:outline-none focus:border-amber/50"
+              />
+              <button type="button" onClick={handleExploreFetch} disabled={exploreLoading || !exploreField.trim()}
+                className="w-full py-2.5 bg-amber text-bg text-sm font-medium rounded-lg hover:bg-amber-glow transition-colors disabled:opacity-40">
+                {exploreLoading ? 'Fetching papers…' : 'Show me papers →'}
+              </button>
+            </div>
+          )}
+
+          {exploreStep === 2 && (
+            <div className="p-5 space-y-3">
+              <p className="text-sm text-cream-muted">Select papers that interest you:</p>
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {explorePapers.map((p, i) => (
+                  <label key={i} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all ${selectedTitles.has(p.title) ? 'border-amber/40 bg-amber-subtle/40' : 'border-line bg-bg-card hover:border-line-strong'}`}>
+                    <input type="checkbox" checked={selectedTitles.has(p.title)} onChange={() => {
+                      setSelectedTitles((prev) => { const n = new Set(prev); if (n.has(p.title)) n.delete(p.title); else n.add(p.title); return n; });
+                    }} className="mt-0.5 accent-amber" />
+                    <div>
+                      <p className="text-[13px] font-medium text-cream leading-snug">{p.title}</p>
+                      {p.year && <p className="text-[11px] text-cream-faint font-mono mt-0.5">{p.year}</p>}
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <button type="button" onClick={handleExploreSuggest} disabled={exploreLoading || selectedTitles.size === 0}
+                className="w-full py-2.5 bg-amber text-bg text-sm font-medium rounded-lg hover:bg-amber-glow transition-colors disabled:opacity-40">
+                {exploreLoading ? 'Generating…' : `Suggest hypotheses (${selectedTitles.size} selected)`}
+              </button>
+            </div>
+          )}
+
+          {exploreStep === 3 && (
+            <div className="p-5 space-y-3">
+              <p className="text-sm text-cream-muted">Choose a hypothesis to investigate:</p>
+              <div className="space-y-2">
+                {suggestedHyps.map((h, i) => (
+                  <button key={i} type="button" onClick={() => handleExploreSelect(h)}
+                    className="w-full text-left p-3.5 rounded-lg border border-line bg-bg-card hover:border-amber/40 hover:bg-amber-subtle/30 transition-all">
+                    <p className="text-[13px] text-cream leading-relaxed">{h}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-7">
         {/* Hypothesis input */}
         <div>
-          <label className="text-[11px] font-mono text-cream-muted tracking-widest uppercase mb-2 block">
-            Hypothesis
-          </label>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-[11px] font-mono text-cream-muted tracking-widest uppercase">
+              Hypothesis
+            </label>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => { setShowPico((v) => !v); setExploreMode(false); }}
+                className={`text-[10px] font-mono px-2 py-0.5 rounded border transition-colors ${showPico ? 'border-amber/40 text-amber bg-amber-subtle' : 'border-line text-cream-faint hover:text-cream'}`}>
+                PICO builder
+              </button>
+              <button type="button" onClick={() => { setExploreMode((v) => !v); setShowPico(false); setExploreStep(1); }}
+                className={`text-[10px] font-mono px-2 py-0.5 rounded border transition-colors ${exploreMode ? 'border-amber/40 text-amber bg-amber-subtle' : 'border-line text-cream-faint hover:text-cream'}`}>
+                Explore field
+              </button>
+            </div>
+          </div>
+
+          {/* PICO builder */}
+          {showPico && (
+            <div className="mb-3 p-4 bg-bg-card border border-amber/15 rounded-lg space-y-3">
+              <p className="text-[10px] font-mono text-amber tracking-widest uppercase">PICO Framework</p>
+              {[
+                { key: 'population', label: 'Population / Subject', placeholder: 'e.g. ICU patients, ResNet models, small firms' },
+                { key: 'intervention', label: 'Intervention / Method', placeholder: 'e.g. deep learning, behavioral nudges, CRISPR' },
+                { key: 'comparison', label: 'Comparison (optional)', placeholder: 'e.g. traditional logistic regression, control group' },
+                { key: 'outcome', label: 'Outcome', placeholder: 'e.g. diagnostic accuracy, mortality rate, revenue' },
+                { key: 'domain', label: 'Domain (optional)', placeholder: 'e.g. radiology, economics, neuroscience' },
+              ].map(({ key, label, placeholder }) => (
+                <div key={key}>
+                  <label className="text-[10px] font-mono text-cream-faint block mb-1">{label}</label>
+                  <input type="text" value={(pico as Record<string, string>)[key]}
+                    onChange={(e) => setPico((p) => ({ ...p, [key]: e.target.value }))}
+                    placeholder={placeholder}
+                    className="w-full px-3 py-2 bg-bg-inset border border-line rounded text-sm text-cream placeholder:text-cream-faint/60 focus:outline-none focus:border-amber/40"
+                  />
+                </div>
+              ))}
+              <button type="button" onClick={handlePicoGenerate}
+                disabled={picoLoading || !pico.population || !pico.intervention || !pico.outcome}
+                className="w-full py-2 bg-amber text-bg text-sm font-medium rounded hover:bg-amber-glow transition-colors disabled:opacity-40">
+                {picoLoading ? 'Generating…' : 'Generate hypothesis'}
+              </button>
+            </div>
+          )}
+
           <textarea
             value={hypothesis}
             onChange={(e) => setHypothesis(e.target.value)}

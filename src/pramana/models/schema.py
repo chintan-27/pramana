@@ -120,6 +120,16 @@ class AnalysisRun(Base):
     hypothesis = relationship("Hypothesis", back_populates="analysis_runs")
 
 
+class Annotation(Base):
+    __tablename__ = "annotations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(100), nullable=False)  # UUID run_id from _analysis_store
+    content_ref = Column(String(200), nullable=False)  # e.g. "gap:0", "finding:3"
+    note = Column(Text, default="")
+    created_at = Column(DateTime, default=func.now())
+
+
 class ExpertFeedback(Base):
     __tablename__ = "expert_feedback"
 

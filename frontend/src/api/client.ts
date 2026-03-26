@@ -253,6 +253,95 @@ export function exportReport(runId: number, format: 'bibtex' | 'csv' | 'markdown
   window.open(`${BASE_URL}/reports/${runId}/export?format=${format}`, '_blank');
 }
 
+// --- Batch I: Annotations, re-run, follow-up search ---
+
+export interface Annotation {
+  id: number;
+  content_ref: string;
+  note: string;
+  created_at: string;
+}
+
+export async function createAnnotation(runId: string | number, contentRef: string, note = ''): Promise<Annotation> {
+  const res = await fetch(`${BASE_URL}/reports/${runId}/annotations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content_ref: contentRef, note }),
+  });
+  if (!res.ok) throw new Error(`Failed to create annotation: ${res.statusText}`);
+  return res.json();
+}
+
+export async function getAnnotations(runId: string | number): Promise<{ annotations: Annotation[] }> {
+  const res = await fetch(`${BASE_URL}/reports/${runId}/annotations`);
+  if (!res.ok) throw new Error(`Failed to get annotations: ${res.statusText}`);
+  return res.json();
+}
+
+export async function deleteAnnotation(runId: string | number, annId: number): Promise<void> {
+  const res = await fetch(`${BASE_URL}/reports/${runId}/annotations/${annId}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`Failed to delete annotation: ${res.statusText}`);
+}
+
+export async function rerunLens(runId: string, lensName: string): Promise<LensResult> {
+  const res = await fetch(`${BASE_URL}/analyze/${runId}/rerun-lens`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lens_name: lensName }),
+  });
+  if (!res.ok) throw new Error(`Failed to re-run lens: ${res.statusText}`);
+  return res.json();
+}
+
+export async function searchMore(
+  runId: string,
+  query: string,
+  maxPapers = 10,
+): Promise<{ added_papers: number; new_facts: number; message: string }> {
+  const res = await fetch(`${BASE_URL}/analyze/${runId}/search-more`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, max_papers: maxPapers }),
+  });
+  if (!res.ok) throw new Error(`Search failed: ${res.statusText}`);
+  return res.json();
+}
+
+// --- Batch J: Explore / Onboarding ---
+
+export async function exploreSamplePapers(field: string): Promise<{ papers: Array<{ title: string; abstract: string; year: number | null }> }> {
+  const res = await fetch(`${BASE_URL}/explore/sample-papers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ field }),
+  });
+  if (!res.ok) throw new Error(`Failed to fetch sample papers: ${res.statusText}`);
+  return res.json();
+}
+
+export async function suggestHypotheses(field: string, selectedTitles: string[]): Promise<{ hypotheses: string[] }> {
+  const res = await fetch(`${BASE_URL}/explore/suggest-hypotheses`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ field, selected_titles: selectedTitles }),
+  });
+  if (!res.ok) throw new Error(`Failed to suggest hypotheses: ${res.statusText}`);
+  return res.json();
+}
+
+export async function buildHypothesis(
+  population: string, intervention: string, comparison: string,
+  outcome: string, domain: string,
+): Promise<{ hypothesis: string }> {
+  const res = await fetch(`${BASE_URL}/explore/build-hypothesis`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ population, intervention, comparison, outcome, domain }),
+  });
+  if (!res.ok) throw new Error(`Failed to build hypothesis: ${res.statusText}`);
+  return res.json();
+}
+
 export function streamAnalysisProgress(
   runId: string,
   onEvent: (data: RunStatus) => void,
