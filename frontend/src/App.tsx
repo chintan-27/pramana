@@ -7,6 +7,7 @@ import EvidenceExplorer from './pages/EvidenceExplorer';
 import ReportHistory from './pages/ReportHistory';
 import ConfirmHypothesis from './pages/ConfirmHypothesis';
 import PaperCuration from './pages/PaperCuration';
+import ExperimentPlanner from './pages/ExperimentPlanner';
 import { ThemeProvider, useTheme } from './theme';
 import './index.css';
 
@@ -49,24 +50,23 @@ function ThemeToggle() {
 }
 
 function AppShell() {
+  const location = useLocation();
+  const isReport = location.pathname.startsWith('/report');
+
   return (
     <div className="min-h-screen bg-bg grain">
-      {/* Top bar — ultra minimal */}
-      <nav className="fixed top-0 left-0 right-0 z-50 border-b border-line backdrop-blur-xl bg-bg/80">
-        <div className="max-w-5xl mx-auto px-6 sm:px-8">
-          <div className="flex items-center justify-between h-12">
-            <Link to="/" className="flex items-center gap-2.5 group">
-              <span className="font-display text-[18px] font-600 text-cream tracking-tight">
-                Pramana
-              </span>
-              <span className="text-[10px] font-mono text-cream-faint tracking-widest uppercase mt-px">
-                v0.1
-              </span>
+      {/* Top bar */}
+      <nav className="fixed top-0 left-0 right-0 z-50 border-b border-line backdrop-blur-xl bg-bg/85">
+        <div className="px-5 sm:px-8">
+          <div className="flex items-center justify-between h-11">
+            <Link to="/" className="flex items-center gap-2 group">
+              <span className="font-display text-[17px] font-600 text-cream tracking-tight">Pramana</span>
+              <span className="hidden sm:inline text-[9px] font-mono text-cream-faint/50 tracking-widest uppercase mt-px">research</span>
             </Link>
-            <div className="flex items-center gap-1">
-              <NavLink to="/">Analyze</NavLink>
+            <div className="flex items-center gap-0.5">
+              <NavLink to="/">New Analysis</NavLink>
+              <NavLink to="/history">Reports</NavLink>
               <NavLink to="/evidence">Evidence</NavLink>
-              <NavLink to="/history">History</NavLink>
               <div className="ml-2 pl-2 border-l border-line">
                 <ThemeToggle />
               </div>
@@ -75,11 +75,12 @@ function AppShell() {
         </div>
       </nav>
 
-      {/* Content */}
-      <main className="max-w-5xl mx-auto px-6 sm:px-8 pt-16 pb-20">
+      {/* Content — report pages break out of centered container */}
+      <main className={isReport ? 'pt-11 pb-20' : 'max-w-5xl mx-auto px-6 sm:px-8 pt-14 pb-20'}>
         <Routes>
           <Route path="/" element={<HypothesisInput />} />
           <Route path="/analysis/:runId" element={<AnalysisProgress />} />
+          <Route path="/plan/:runId" element={<ExperimentPlanner />} />
           <Route path="/confirm/:runId" element={<ConfirmHypothesis />} />
           <Route path="/curate/:runId" element={<PaperCuration />} />
           <Route path="/report/db/:runId" element={<SavedReportViewer />} />
@@ -88,18 +89,6 @@ function AppShell() {
           <Route path="/history" element={<ReportHistory />} />
         </Routes>
       </main>
-
-      {/* Footer line */}
-      <div className="border-t border-line">
-        <div className="max-w-5xl mx-auto px-6 sm:px-8 py-4 flex items-center justify-between">
-          <span className="text-[11px] text-cream-faint font-mono tracking-wide">
-            hypothesis-driven research assistant
-          </span>
-          <span className="text-[11px] text-cream-faint font-mono">
-            built with evidence
-          </span>
-        </div>
-      </div>
     </div>
   );
 }

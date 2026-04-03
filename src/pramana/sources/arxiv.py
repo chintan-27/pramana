@@ -25,7 +25,7 @@ def search_papers(
     }
 
     logger.info("arXiv search: query=%r, max_results=%d", query, max_results)
-    response = httpx.get(ARXIV_API_URL, params=params, timeout=30.0, follow_redirects=True)
+    response = httpx.get(ARXIV_API_URL, params=params, timeout=10.0, follow_redirects=True)
     response.raise_for_status()
 
     papers = _parse_atom_response(response.text)

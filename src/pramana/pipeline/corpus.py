@@ -2,6 +2,7 @@
 
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from pydantic import BaseModel
 
@@ -34,58 +35,74 @@ def build_corpus(
     query: HypothesisQuery,
     max_papers: int,
     settings: Settings,
+    on_progress: callable = None,
 ) -> Corpus:
-    """Build a corpus of papers from all sources based on the hypothesis query."""
+    """Build a corpus of papers from all sources, parallelized."""
     all_papers: list[dict] = []
     per_source = max(max_papers // 4, 10)
 
     corpus = Corpus()
 
+    queries = query.search_queries
     logger.info("Building corpus: %d queries, max_papers=%d",
-                 len(query.search_queries), max_papers)
+                 len(queries), max_papers)
 
-    for search_query in query.search_queries:
-        # Semantic Scholar
+    def _search_one(search_query: str, source: str) -> list[dict]:
+        """Run a single source search. Returns list of paper dicts."""
         try:
-            s2_papers = semantic_scholar.search_papers(
-                search_query, settings, limit=per_source, year_range=query.time_range,
-            )
-            for p in s2_papers:
-                p.setdefault("source", "s2")
-            corpus.total_from_s2 += len(s2_papers)
-            all_papers.extend(s2_papers)
+            if source == "s2":
+                papers = semantic_scholar.search_papers(
+                    search_query, settings,
+                    limit=per_source, year_range=query.time_range,
+                )
+            elif source == "arxiv":
+                papers = arxiv.search_papers(
+                    search_query, max_results=per_source,
+                )
+            elif source == "pubmed":
+                papers = pubmed.search_papers(
+                    search_query, settings, max_results=per_source,
+                )
+            elif source == "crossref":
+                papers = crossref.search_papers(
+                    search_query, max_results=per_source,
+                )
+            else:
+                return []
+            for p in papers:
+                p.setdefault("source", source)
+            return papers
         except Exception as e:
-            logger.warning(f"Semantic Scholar search failed: {e}")
+            logger.warning("%s search failed for %r: %s",
+                           source, search_query[:50], e)
+            return []
 
-        # arXiv
-        try:
-            arxiv_papers = arxiv.search_papers(search_query, max_results=per_source)
-            for p in arxiv_papers:
-                p.setdefault("source", "arxiv")
-            corpus.total_from_arxiv += len(arxiv_papers)
-            all_papers.extend(arxiv_papers)
-        except Exception as e:
-            logger.warning(f"arXiv search failed: {e}")
+    # Submit all query×source combinations in parallel
+    sources = ["s2", "arxiv", "pubmed", "crossref"]
+    futures = {}
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for sq in queries:
+            for src in sources:
+                fut = pool.submit(_search_one, sq, src)
+                futures[fut] = src
 
-        # PubMed
-        try:
-            pm_papers = pubmed.search_papers(search_query, settings, max_results=per_source)
-            for p in pm_papers:
-                p.setdefault("source", "pubmed")
-            corpus.total_from_pubmed += len(pm_papers)
-            all_papers.extend(pm_papers)
-        except Exception as e:
-            logger.warning(f"PubMed search failed: {e}")
-
-        # CrossRef
-        try:
-            cr_papers = crossref.search_papers(search_query, max_results=per_source)
-            for p in cr_papers:
-                p.setdefault("source", "crossref")
-            corpus.total_from_crossref += len(cr_papers)
-            all_papers.extend(cr_papers)
-        except Exception as e:
-            logger.warning(f"CrossRef search failed: {e}")
+        for fut in as_completed(futures):
+            src = futures[fut]
+            papers = fut.result()
+            if src == "s2":
+                corpus.total_from_s2 += len(papers)
+            elif src == "arxiv":
+                corpus.total_from_arxiv += len(papers)
+            elif src == "pubmed":
+                corpus.total_from_pubmed += len(papers)
+            elif src == "crossref":
+                corpus.total_from_crossref += len(papers)
+            all_papers.extend(papers)
+            if on_progress and callable(on_progress):
+                try:
+                    on_progress(src, len(papers))
+                except Exception:
+                    pass
 
     logger.info("Raw papers collected: %d (before dedup)", len(all_papers))
 

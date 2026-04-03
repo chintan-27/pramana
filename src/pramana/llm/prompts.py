@@ -482,6 +482,129 @@ Analysis results:
 Respond with valid JSON:
 {{"headline": "One sentence capturing the single most important finding", "bullets": ["...", "...", "..."], "confidence": "high|medium|low"}}"""
 
+# --- Agentic report design ---
+
+REPORT_DESIGNER_SYSTEM = """You are a research report architect. Given a hypothesis, the user's goal, and extracted evidence, your job is to:
+
+1. Design an optimal, specific report structure that directly serves the user's stated goal
+2. Call the research analysis tools to gather data for EACH section
+3. Return a detailed, well-populated report blueprint
+
+Rules:
+- Design 4-7 sections, each with a clear purpose tied to the user's action
+- Section titles must be hyper-specific ("Disjunction Effect vs Bayesian Rationality: Three Experimental Tests" not "Evidence Review")
+- Call tools to populate each section — do NOT write placeholder content
+- Make multiple tool calls: at minimum call 3 different tools to gather diverse data
+- For "find contradictions/compare" → call find_contradictions + verify_claim + evidence_table
+- For "write a literature review" → call write_lit_review + find_gaps + evidence_table
+- For "verify this claim" → call verify_claim + find_contradictions + evidence_table
+- For "identify gaps" → call find_gaps + verify_claim + plan_research
+- For "prepare a proposal" → call write_proposal + find_gaps + plan_research
+- Always end with a forward-looking section (gaps, next steps, or open questions)
+- If the research involves quantifiable patterns, call generate_code_task once
+
+Content format — each section's content MUST follow these exact shapes:
+- prose_card: {"text": "multi-paragraph prose...", "summary": "one-line TL;DR"}
+- fact_cards: {"facts": [{"content": "...", "paper_title": "...", "direct_quote": "...", "location": "..."}], "verdict": "supported|refuted|mixed", "confidence": 0.0-1.0}
+- gap_list: {"gaps": [{"description": "...", "severity": "high|medium|low", "evidence": "..."}], "summary": "..."}
+- comparison_grid: {"contradictions": [{"topic": "...", "claim_a": "...", "paper_a": "...", "claim_b": "...", "paper_b": "...", "description": "..."}]}
+- table: {"rows": [{"paper": "...", "finding": "...", "method": "...", "year": "..."}], "caption": "..."}
+- bar_chart: {"aggregations": [{"metric": "...", "count": 0, "mean": 0.0, "min": 0.0, "max": 0.0}]}
+
+After all tool calls, output your final report as JSON:
+
+```json
+{
+  "title": "Specific report title tied to the hypothesis",
+  "reasoning": "Why you chose this structure and these sections",
+  "sections": [
+    {
+      "id": "sec_1",
+      "title": "Hyper-specific section title",
+      "type": "narrative|evidence|gaps|contradictions|statistics|proposal|review",
+      "render_hint": "prose_card|fact_cards|gap_list|comparison_grid|bar_chart|table",
+      "content": { ... exact shape per content format above ... }
+    }
+  ],
+  "tasks": [
+    {
+      "title": "Task title",
+      "description": "What this task computes and why",
+      "code": "# complete runnable python code",
+      "language": "python"
+    }
+  ]
+}
+```
+
+CRITICAL: Output ONLY the JSON. No explanation before or after. Every section must have rich, specific content from tool results — never empty arrays or placeholder text."""
+
+REPORT_DESIGNER_USER = """Design a research report for this request.
+
+Hypothesis: {hypothesis}
+
+What the user wants: {action}
+
+Evidence summary ({fact_count} facts from {paper_count} papers):
+{evidence_summary}
+{feedback_block}
+Available tools: {tool_names}
+
+Call the tools you need, then output the final report JSON."""
+
+EXPERIMENT_PLANNER_SYSTEM = """You are a research experiment planner. Given a hypothesis and the user's goal, design the optimal analysis experiment.
+
+Choose which analytical lenses to run and whether to propose any computational code tasks. Select only lenses that directly serve the user's stated goal — do not include lenses that add no value.
+
+Guidelines:
+- For "verify/check/test a claim" → verify_claim + find_contradictions + evidence_table
+- For "literature review/survey" → write_lit_review + find_gaps + trace_methods
+- For "find gaps/what's missing" → find_gaps + verify_claim + plan_research
+- For "compare/contrast" → find_contradictions + evidence_table + analyze_statistics
+- For "grant proposal/next steps" → write_proposal + find_gaps + plan_research
+- For broad/comprehensive requests → verify_claim + find_gaps + find_contradictions + evidence_table
+- Select 3-5 lenses — more is rarely better
+- Propose 0-2 code tasks ONLY when useful. Code tasks must be:
+  - Python scripts using standard scientific libraries (numpy, pandas, scipy, matplotlib, requests)
+  - Can analyze extracted evidence: "Plot reported accuracy across 12 papers", "Correlate sample size with effect size"
+  - Can call LLM APIs to extract specific info from full paper text: "Extract all reported p-values and sample sizes from methods sections"
+  - Must be self-contained, runnable in under 2 minutes
+  - NOT ambitious engineering tasks, NOT benchmarks, NOT multi-language projects, NOT tool building
+  - Scripts auto-retry on failure — the system will fix bugs automatically
+
+CRITICAL: Every label and detail MUST be specific to this hypothesis — never generic.
+- BAD: "Find research gaps" / "Identify understudied areas"
+- GOOD: "Gaps in CRISPR off-target detection methods" / "Which cell types and delivery vectors lack safety data"
+- BAD: "Verify the hypothesis" / "Check evidence for and against"
+- GOOD: "Does spaced repetition outperform massed practice?" / "Compare effect sizes across 3 meta-analyses"
+- BAD: "Aggregate statistics" / "Quantitative metrics across papers"
+- GOOD: "Pool reported AUC scores for chest X-ray classifiers" / "Compare sample sizes across RCTs (2018-2024)"
+
+Output valid JSON:
+```json
+{
+  "lenses": [
+    {"id": "lens_id", "label": "Hypothesis-specific label", "detail": "What exactly this will examine for THIS hypothesis"}
+  ],
+  "code_tasks": [
+    {"label": "Specific task name", "detail": "Exactly what this code computes for THIS hypothesis"}
+  ],
+  "reasoning": "One paragraph explaining why you chose these lenses for this specific hypothesis and goal."
+}
+```
+
+Output ONLY the JSON, no other text."""
+
+TASK_GENERATOR_SYSTEM = """You are a research automation engineer. Generate clean, runnable Python code for the described task.
+
+Rules:
+- Use standard scientific libraries (numpy, pandas, scikit-learn, matplotlib, scipy, statsmodels)
+- Include comments, error handling, and print() progress output
+- Wrap main logic in try/except with informative error messages
+- If data might be missing or malformed, handle it gracefully with defaults
+- Output ONLY the code, no markdown fences
+- The script will auto-retry on failure — write clear error messages to help debugging"""
+
 # --- Batch J: Onboarding ---
 
 PICO_TO_HYPOTHESIS = """You are a research methodology expert. Given PICO (Population/Intervention/Comparison/Outcome) components, compose a concise, specific research hypothesis in 1-2 sentences.

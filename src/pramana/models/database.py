@@ -21,6 +21,22 @@ def get_engine(settings: Settings) -> Engine:
 def create_tables(engine: Engine) -> None:
     """Create all tables in the database."""
     Base.metadata.create_all(engine)
+    _run_migrations(engine)
+
+
+def _run_migrations(engine: Engine) -> None:
+    """Apply incremental column additions for existing databases."""
+    with engine.connect() as conn:
+        # linked_section_id added in v2 batch
+        cols = {row[1] for row in conn.execute(
+            __import__("sqlalchemy").text("PRAGMA table_info(research_tasks)")
+        )}
+        if "linked_section_id" not in cols:
+            conn.execute(__import__("sqlalchemy").text(
+                "ALTER TABLE research_tasks ADD COLUMN linked_section_id TEXT"
+            ))
+            conn.commit()
+        # section_feedback table created by create_all; no action needed
 
 
 @contextmanager

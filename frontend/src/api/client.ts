@@ -78,6 +78,24 @@ export interface ExecutiveSummary {
   confidence: string;
 }
 
+export interface ReportSection {
+  id: string;
+  title: string;
+  type: string;
+  content: Record<string, unknown>;
+  render_hint: string;
+}
+
+export interface ResearchTask {
+  id: number;
+  title: string;
+  description: string;
+  code: string;
+  language: string;
+  status: 'proposed' | 'approved' | 'running' | 'completed' | 'failed';
+  output?: string;
+}
+
 export interface Report {
   hypothesis: Record<string, unknown>;
   executive_summary?: ExecutiveSummary;
@@ -88,6 +106,11 @@ export interface Report {
     reasoning: string;
     results: Record<string, FlowResult>;
   };
+  // Agentic report fields
+  title?: string;
+  designer_reasoning?: string;
+  sections?: ReportSection[];
+  tasks?: ResearchTask[];
 }
 
 export async function startAnalysis(request: AnalyzeRequest): Promise<AnalyzeResponse> {
@@ -249,6 +272,54 @@ export async function confirmCorpus(runId: string, excludedIds: number[]): Promi
   if (!res.ok) throw new Error(`Failed to confirm corpus: ${res.statusText}`);
 }
 
+export interface PlanStep {
+  id: string;
+  label: string;
+  detail: string;
+  type: 'pipeline' | 'lens' | 'code' | 'agent';
+}
+
+export interface ExperimentPlan {
+  steps: PlanStep[];
+  reasoning: string;
+}
+
+export async function approvePlan(runId: string, disabledSteps: string[] = []): Promise<void> {
+  const res = await fetch(`${BASE_URL}/analyze/${runId}/approve-plan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ disabled_steps: disabledSteps }),
+  });
+  if (!res.ok) throw new Error(`Failed to approve plan: ${res.statusText}`);
+}
+
+export interface SectionFeedbackData {
+  id: number;
+  run_id: string;
+  section_id: string;
+  rating: number;
+  note: string;
+  created_at: string;
+}
+
+export async function submitSectionFeedback(
+  runId: string, sectionId: string, rating: number, note = '',
+): Promise<SectionFeedbackData> {
+  const res = await fetch(`${BASE_URL}/reports/${runId}/sections/${sectionId}/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rating, note }),
+  });
+  if (!res.ok) throw new Error(`Failed to submit feedback: ${res.statusText}`);
+  return res.json();
+}
+
+export async function getSectionFeedback(runId: string): Promise<SectionFeedbackData[]> {
+  const res = await fetch(`${BASE_URL}/reports/${runId}/feedback`);
+  if (!res.ok) throw new Error(`Failed to get feedback: ${res.statusText}`);
+  return res.json();
+}
+
 export function exportReport(runId: number, format: 'bibtex' | 'csv' | 'markdown' | 'docx'): void {
   window.open(`${BASE_URL}/reports/${runId}/export?format=${format}`, '_blank');
 }
@@ -357,5 +428,77 @@ export function streamAnalysisProgress(
     es.close();
   };
   return es;
+}
+
+// --- Agentic tasks ---
+
+export async function getTasks(
+  runId: string | number,
+): Promise<ResearchTask[]> {
+  const res = await fetch(`${BASE_URL}/reports/${runId}/tasks`);
+  if (!res.ok) throw new Error(`Failed to get tasks: ${res.statusText}`);
+  const data = await res.json();
+  return data.tasks;
+}
+
+export async function approveTask(
+  runId: string | number,
+  taskId: number,
+): Promise<void> {
+  const res = await fetch(
+    `${BASE_URL}/reports/${runId}/tasks/${taskId}/approve`,
+    { method: 'POST' },
+  );
+  if (!res.ok) throw new Error(`Failed to approve task: ${res.statusText}`);
+}
+
+export async function runTask(
+  runId: string | number,
+  taskId: number,
+): Promise<{ status: string; message: string }> {
+  const res = await fetch(
+    `${BASE_URL}/reports/${runId}/tasks/${taskId}/run`,
+    { method: 'POST' },
+  );
+  if (!res.ok) throw new Error(`Failed to run task: ${res.statusText}`);
+  return res.json();
+}
+
+export async function updateTaskCode(
+  runId: string | number,
+  taskId: number,
+  code: string,
+): Promise<void> {
+  const res = await fetch(
+    `${BASE_URL}/reports/${runId}/tasks/${taskId}/code`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    },
+  );
+  if (!res.ok) throw new Error(`Failed to update task: ${res.statusText}`);
+}
+
+export async function deleteTask(
+  runId: string | number,
+  taskId: number,
+): Promise<void> {
+  const res = await fetch(
+    `${BASE_URL}/reports/${runId}/tasks/${taskId}`,
+    { method: 'DELETE' },
+  );
+  if (!res.ok) throw new Error(`Failed to delete task: ${res.statusText}`);
+}
+
+export async function getTaskOutput(
+  runId: string | number,
+  taskId: number,
+): Promise<{ task: ResearchTask }> {
+  const res = await fetch(
+    `${BASE_URL}/reports/${runId}/tasks/${taskId}/output`,
+  );
+  if (!res.ok) throw new Error(`Failed to get output: ${res.statusText}`);
+  return res.json();
 }
 

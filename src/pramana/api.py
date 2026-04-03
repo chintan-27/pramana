@@ -17,7 +17,10 @@ from starlette.responses import StreamingResponse
 from pramana.config import get_settings
 from pramana.llm.sanitize import sanitize_user_input
 from pramana.models.database import create_tables, get_engine, get_session, seed_venues
-from pramana.models.schema import AnalysisRun, Annotation, ExpertFeedback, Hypothesis, Paper
+from pramana.models.schema import (
+    AnalysisRun, Annotation, ExpertFeedback, Hypothesis, Paper,
+    SectionFeedback,
+)
 from pramana.models.schema import ExtractedFact as ExtractedFactDB
 from pramana.models.vectors import get_chroma_client, get_evidence_collection, search_evidence
 
@@ -148,6 +151,20 @@ class FeedbackResponse(BaseModel):
     created_at: str
 
 
+class SectionFeedbackRequest(BaseModel):
+    rating: int  # 1-5
+    note: str = ""
+
+
+class SectionFeedbackResponse(BaseModel):
+    id: int
+    run_id: str
+    section_id: str
+    rating: int
+    note: str
+    created_at: str
+
+
 class VenueResponse(BaseModel):
     id: int
     name: str
@@ -257,8 +274,10 @@ async def start_analysis(request: AnalyzeRequest, background_tasks: BackgroundTa
         "result": None,
         "error": None,
         # Human-in-the-loop pause points
+        "_plan_event": threading.Event(),      # unblocked by approve-plan endpoint
         "_confirm_event": threading.Event(),   # unblocked by confirm-hypothesis endpoint
         "_curate_event": threading.Event(),    # unblocked by confirm-corpus endpoint
+        "_disabled_steps": [],                 # plan steps the user toggled off
         "parsed_query": None,                  # set after stage 1 pause
         "corpus_papers": None,                 # set after stage 3 pause
     }
@@ -305,7 +324,9 @@ async def stream_analysis_progress(run_id: str):
             yield f"data: {payload}\n\n"
 
             if store["status"] in ("completed", "failed",
-                                    "awaiting_confirmation", "awaiting_curation"):
+                                    "awaiting_plan_approval",
+                                    "awaiting_confirmation",
+                                    "awaiting_curation"):
                 break
             await asyncio.sleep(0.5)
 
@@ -771,6 +792,22 @@ async def get_parsed_query(run_id: str):
     return {"run_id": run_id, "status": store["status"], "parsed_query": store["parsed_query"]}
 
 
+class ApprovePlanRequest(BaseModel):
+    disabled_steps: list[str] = []  # step IDs the user toggled off
+
+
+@app.post("/api/analyze/{run_id}/approve-plan")
+async def approve_plan(run_id: str, request: ApprovePlanRequest):
+    """Approve the experiment plan (optionally disabling steps)."""
+    if run_id not in _analysis_store:
+        raise HTTPException(404, "Analysis run not found")
+    store = _analysis_store[run_id]
+    # Accept approval even if auto-continue already fired (status=running)
+    store["_disabled_steps"] = request.disabled_steps
+    store["_plan_event"].set()
+    return {"ok": True}
+
+
 class ConfirmHypothesisRequest(BaseModel):
     domains: list[str] | None = None
     topics: list[str] | None = None
@@ -836,6 +873,62 @@ async def confirm_corpus(run_id: str, request: ConfirmCorpusRequest):
 class AnnotationRequest(BaseModel):
     content_ref: str   # e.g. "gap:0", "finding:3", "lens:lit_review"
     note: str = ""
+
+
+@app.post("/api/reports/{run_id}/sections/{section_id}/feedback")
+async def submit_section_feedback(
+    run_id: str, section_id: str, request: SectionFeedbackRequest,
+):
+    """Submit rating feedback for a report section."""
+    if not 1 <= request.rating <= 5:
+        raise HTTPException(400, "Rating must be 1-5")
+    settings = get_settings()
+    with get_session(settings) as session:
+        fb = SectionFeedback(
+            run_id=run_id,
+            section_id=section_id,
+            rating=request.rating,
+            note=request.note,
+        )
+        session.add(fb)
+        session.flush()
+        return SectionFeedbackResponse(
+            id=fb.id,
+            run_id=fb.run_id,
+            section_id=fb.section_id,
+            rating=fb.rating,
+            note=fb.note or "",
+            created_at=(
+                fb.created_at.isoformat() if fb.created_at else ""
+            ),
+        )
+
+
+@app.get("/api/reports/{run_id}/feedback")
+async def get_section_feedback(run_id: str):
+    """Get all section feedback for a run."""
+    settings = get_settings()
+    with get_session(settings) as session:
+        fbs = (
+            session.query(SectionFeedback)
+            .filter(SectionFeedback.run_id == run_id)
+            .order_by(SectionFeedback.created_at.desc())
+            .all()
+        )
+        return [
+            SectionFeedbackResponse(
+                id=fb.id,
+                run_id=fb.run_id,
+                section_id=fb.section_id,
+                rating=fb.rating,
+                note=fb.note or "",
+                created_at=(
+                    fb.created_at.isoformat()
+                    if fb.created_at else ""
+                ),
+            )
+            for fb in fbs
+        ]
 
 
 @app.post("/api/reports/{run_id}/annotations")
@@ -1084,6 +1177,111 @@ async def explore_build_hypothesis(request: BuildHypothesisRequest):
         return {"hypothesis": raw}
 
 
+# --- Task CRUD + execution endpoints ---
+
+
+class UpdateTaskCodeRequest(BaseModel):
+    code: str
+
+
+@app.get("/api/reports/{run_id}/tasks")
+async def get_tasks(run_id: str):
+    """List all research tasks for a run."""
+    settings = get_settings()
+    from pramana.models.schema import ResearchTask
+    with get_session(settings) as session:
+        from sqlalchemy import select
+        tasks = session.execute(
+            select(ResearchTask).where(ResearchTask.run_id == run_id)
+            .order_by(ResearchTask.id)
+        ).scalars().all()
+        return [
+            {"id": t.id, "title": t.title, "description": t.description,
+             "code": t.code, "language": t.language, "status": t.status,
+             "output": t.output or "",
+             "created_at": t.created_at.isoformat() if t.created_at else ""}
+            for t in tasks
+        ]
+
+
+@app.post("/api/reports/{run_id}/tasks/{task_id}/approve")
+async def approve_task(run_id: str, task_id: int):
+    settings = get_settings()
+    from pramana.models.schema import ResearchTask
+    with get_session(settings) as session:
+        task = session.get(ResearchTask, task_id)
+        if not task or task.run_id != run_id:
+            raise HTTPException(404, "Task not found")
+        task.status = "approved"
+    return {"status": "approved"}
+
+
+@app.put("/api/reports/{run_id}/tasks/{task_id}/code")
+async def update_task_code(run_id: str, task_id: int, request: UpdateTaskCodeRequest):
+    settings = get_settings()
+    from pramana.models.schema import ResearchTask
+    with get_session(settings) as session:
+        task = session.get(ResearchTask, task_id)
+        if not task or task.run_id != run_id:
+            raise HTTPException(404, "Task not found")
+        task.code = request.code
+    return {"status": "updated"}
+
+
+@app.post("/api/reports/{run_id}/tasks/{task_id}/run")
+async def run_task(run_id: str, task_id: int, bg: BackgroundTasks):
+    settings = get_settings()
+    from pramana.models.schema import ResearchTask
+    with get_session(settings) as session:
+        task = session.get(ResearchTask, task_id)
+        if not task or task.run_id != run_id:
+            raise HTTPException(404, "Task not found")
+        if task.status not in ("approved", "proposed"):
+            raise HTTPException(400, f"Task status is '{task.status}'")
+        task.status = "approved"
+
+    from pramana.tasks.executor import execute_task
+    bg.add_task(execute_task, task_id, settings)
+    return {"status": "running", "task_id": task_id}
+
+
+@app.get("/api/reports/{run_id}/tasks/{task_id}/output")
+async def get_task_output(run_id: str, task_id: int):
+    settings = get_settings()
+    from pramana.models.schema import ResearchTask
+    with get_session(settings) as session:
+        task = session.get(ResearchTask, task_id)
+        if not task or task.run_id != run_id:
+            raise HTTPException(404, "Task not found")
+        return {"status": task.status, "output": task.output or ""}
+
+
+@app.delete("/api/reports/{run_id}/tasks/{task_id}")
+async def delete_task(run_id: str, task_id: int):
+    settings = get_settings()
+    from pramana.models.schema import ResearchTask
+    with get_session(settings) as session:
+        task = session.get(ResearchTask, task_id)
+        if not task or task.run_id != run_id:
+            raise HTTPException(404, "Task not found")
+        session.delete(task)
+    return {"status": "deleted"}
+
+
+# --- MCP tool listing endpoint ---
+
+@app.get("/api/mcp/tools")
+async def list_mcp_tools():
+    """List all available MCP research tools."""
+    from pramana.mcp.tools import TOOL_DEFINITIONS
+    return [
+        {"name": t["function"]["name"],
+         "description": t["function"]["description"],
+         "parameters": t["function"].get("parameters", {})}
+        for t in TOOL_DEFINITIONS
+    ]
+
+
 def _bibtex_key(authors: list[str], year: int | None, title: str) -> str:
     """Generate a BibTeX citation key."""
     import re
@@ -1130,6 +1328,68 @@ def _build_report_summary(report_data: dict, max_chars: int = 8000) -> str:
 
 
 
+def _build_feedback_summary(hypothesis_text: str) -> str:
+    """Query prior section feedback for runs on a matching hypothesis."""
+    settings = get_settings()
+    try:
+        with get_session(settings) as session:
+            # Find hypothesis IDs that match this text
+            hyps = (
+                session.query(Hypothesis.id)
+                .filter(Hypothesis.text == hypothesis_text)
+                .all()
+            )
+            if not hyps:
+                return ""
+            hyp_ids = [h.id for h in hyps]
+
+            # Find completed run IDs for those hypotheses
+            runs = (
+                session.query(AnalysisRun.id)
+                .filter(
+                    AnalysisRun.hypothesis_id.in_(hyp_ids),
+                    AnalysisRun.status == "completed",
+                )
+                .all()
+            )
+            if not runs:
+                return ""
+            run_ids = [str(r.id) for r in runs]
+
+            # Aggregate section feedback across those runs
+            feedback_rows = (
+                session.query(SectionFeedback)
+                .filter(SectionFeedback.run_id.in_(run_ids))
+                .all()
+            )
+            if not feedback_rows:
+                return ""
+
+            # Group by section_id and compute average rating
+            from collections import defaultdict
+            grouped: dict[str, list] = defaultdict(list)
+            notes: dict[str, list] = defaultdict(list)
+            for fb in feedback_rows:
+                grouped[fb.section_id].append(fb.rating)
+                if fb.note:
+                    notes[fb.section_id].append(fb.note)
+
+            lines = []
+            for sec_id, ratings in grouped.items():
+                avg = sum(ratings) / len(ratings)
+                note_str = ""
+                if notes.get(sec_id):
+                    note_str = f' — "{notes[sec_id][-1]}"'
+                lines.append(
+                    f'- Section "{sec_id}" '
+                    f"({len(ratings)} ratings): avg {avg:.1f}/5{note_str}"
+                )
+            return "\n".join(lines)
+    except Exception:
+        logger.debug("Could not load feedback summary", exc_info=True)
+        return ""
+
+
 # --- Background task ---
 
 def _run_analysis(run_id: str) -> None:
@@ -1141,9 +1401,48 @@ def _run_analysis(run_id: str) -> None:
         store["status"] = "running"
         logger.info("[%s] Pipeline started: %s", run_id[:8], store["hypothesis"][:80])
 
+        # Stage 0: Plan the experiment (agentic path only)
+        action = store.get("action", "")
+        if action.strip():
+            store["stage"] = "planning"
+            store["progress"] = {
+                "step": 0, "total": 8,
+                "description": "Planning experiment",
+                "mode": "agentic",
+            }
+            logger.info("[%s] Stage 0: Planning experiment", run_id[:8])
+            from pramana.agents.planner import plan_experiment
+            plan = plan_experiment(store["hypothesis"], action, settings)
+            store["progress"]["plan"] = plan
+            store["progress"]["plan_ready"] = True
+            logger.info("[%s] Plan ready: %d steps", run_id[:8],
+                        len(plan.get("steps", [])))
+
+            # Pause for plan approval (120s timeout → auto-continue)
+            store["status"] = "awaiting_plan_approval"
+            store["stage"] = "awaiting_plan_approval"
+            store["_plan_event"].wait(timeout=120)
+            store["status"] = "running"
+
+            # Apply any disabled steps
+            disabled = store.get("_disabled_steps", [])
+            if disabled:
+                plan["steps"] = [
+                    s for s in plan["steps"]
+                    if s["id"] not in disabled
+                ]
+                logger.info("[%s] User disabled %d steps",
+                            run_id[:8], len(disabled))
+            store["progress"]["plan"] = plan
+
+        total_stages = 8 if action.strip() else 7
+
         # Stage 1: Parse hypothesis
         store["stage"] = "parsing"
-        store["progress"] = {"step": 1, "total": 7, "description": "Parsing hypothesis"}
+        store["progress"] = {
+            "step": 1, "total": total_stages,
+            "description": "Parsing hypothesis",
+        }
         logger.info("[%s] Stage 1/7: Parsing hypothesis", run_id[:8])
         from pramana.pipeline.hypothesis import parse_hypothesis
         parsed = parse_hypothesis(
@@ -1173,10 +1472,27 @@ def _run_analysis(run_id: str) -> None:
 
         # Stage 2: Build corpus
         store["stage"] = "retrieval"
-        store["progress"] = {"step": 2, "total": 7, "description": "Retrieving papers"}
+        store["progress"] = {
+            "step": 2, "total": total_stages,
+            "description": "Querying sources in parallel",
+            "sources": {"s2": 0, "arxiv": 0, "pubmed": 0, "crossref": 0},
+            "papers_found": 0,
+        }
         logger.info("[%s] Stage 2/7: Retrieving papers (max=%d)", run_id[:8], store["max_papers"])
         from pramana.pipeline.corpus import build_corpus
-        corpus = build_corpus(parsed, max_papers=store["max_papers"], settings=settings)
+
+        def _retrieval_progress(source: str, count: int) -> None:
+            srcs = store["progress"].setdefault("sources", {})
+            srcs[source] = srcs.get(source, 0) + count
+            store["progress"]["papers_found"] = sum(srcs.values())
+            store["progress"]["description"] = (
+                f"Found {store['progress']['papers_found']} papers so far"
+            )
+
+        corpus = build_corpus(
+            parsed, max_papers=store["max_papers"], settings=settings,
+            on_progress=_retrieval_progress,
+        )
         store["progress"]["papers_found"] = len(corpus.papers)
         store["progress"]["sources"] = {
             "s2": corpus.total_from_s2,
@@ -1192,7 +1508,10 @@ def _run_analysis(run_id: str) -> None:
 
         # Stage 3: Screen papers
         store["stage"] = "screening"
-        store["progress"] = {"step": 3, "total": 7, "description": "Screening papers for relevance"}
+        store["progress"] = {
+            "step": 3, "total": total_stages,
+            "description": "Screening papers for relevance",
+        }
         logger.info("[%s] Stage 3/7: Screening %d papers", run_id[:8], len(corpus.papers))
         from pramana.pipeline.screening import screen_corpus
         corpus = screen_corpus(corpus, parsed, settings)
@@ -1239,7 +1558,7 @@ def _run_analysis(run_id: str) -> None:
         # Stage 4: Extract evidence
         store["stage"] = "extraction"
         store["progress"] = {
-            "step": 4, "total": 7,
+            "step": 4, "total": total_stages,
             "description": f"Extracting evidence (0 / {passed_count} papers)",
             "papers_processed": 0,
             "papers_total": passed_count,
@@ -1269,7 +1588,10 @@ def _run_analysis(run_id: str) -> None:
 
         # Stage 5: Normalize
         store["stage"] = "normalization"
-        store["progress"] = {"step": 5, "total": 7, "description": "Normalizing evidence"}
+        store["progress"] = {
+            "step": 5, "total": total_stages,
+            "description": "Normalizing evidence",
+        }
         logger.info("[%s] Stage 5/7: Normalizing %d facts", run_id[:8], len(evidence))
         from pramana.pipeline.normalization import normalize_evidence
         normalized = normalize_evidence(evidence, settings)
@@ -1278,37 +1600,138 @@ def _run_analysis(run_id: str) -> None:
         logger.info("[%s] Normalized: %d mappings, %d categories",
                     run_id[:8], len(normalized.canonical_mappings), len(normalized.categories))
 
-        # Stage 6: Route to analysis flows and run lenses
+        # Stage 6/7: Analysis — agentic or legacy flow routing
         store["stage"] = "analysis"
-        store["progress"] = {
-            "step": 6, "total": 7, "description": "Routing and running analysis flows"
-        }
-        logger.info("[%s] Stage 6/7: Routing analysis flows", run_id[:8])
-        from pramana.flows.router import select_flows
-        from pramana.pipeline.orchestrator import run_flows
-        action = store.get("action", "")
-        selected_flows, routing_reasoning = select_flows(
-            store["hypothesis"], action, parsed, settings
-        )
-        store["progress"]["selected_flows"] = [f.name for f in selected_flows]
-        store["progress"]["routing_reasoning"] = routing_reasoning
-        logger.info(
-            "[%s] Flows selected: %s",
-            run_id[:8], ", ".join(f.name for f in selected_flows),
-        )
-        results = run_flows(corpus, normalized, parsed, settings, selected_flows, routing_reasoning)
-        store["progress"]["lenses_completed"] = results.active_lenses
-        logger.info("[%s] Lenses completed: %s", run_id[:8], ", ".join(results.active_lenses))
 
-        # Stage 7: Synthesize + generate report
-        store["stage"] = "report"
-        store["progress"] = {"step": 7, "total": 7, "description": "Synthesizing findings"}
-        logger.info("[%s] Stage 7/7: Synthesizing and generating report", run_id[:8])
-        from pramana.pipeline.orchestrator import synthesize_summary
-        from pramana.report.generator import generate_report
-        results.executive_summary = synthesize_summary(results, parsed, settings)
-        store["progress"]["description"] = "Generating report"
-        report_json = generate_report(results, parsed, "json", settings)
+        if action.strip():
+            # ── AGENTIC PATH: report designer agent designs the report ──
+            store["progress"] = {
+                "step": 7, "total": total_stages,
+                "description": "Agent is designing report structure",
+                "mode": "agentic",
+                "action": action[:120],
+            }
+            logger.info("[%s] Stage 7/8: Agentic report design", run_id[:8])
+            from pramana.agents.report_designer import design_report as agentic_design
+
+            fb_summary = _build_feedback_summary(store["hypothesis"])
+            if fb_summary:
+                logger.info(
+                    "[%s] Loaded prior feedback for agent context",
+                    run_id[:8],
+                )
+
+            agentic_report = agentic_design(
+                hypothesis=store["hypothesis"],
+                action=action,
+                corpus=corpus,
+                evidence=normalized,
+                query=parsed,
+                settings=settings,
+                run_id=run_id,
+                feedback_summary=fb_summary,
+            )
+
+            sections = agentic_report.get("sections", [])
+            tasks = agentic_report.get("tasks", [])
+            store["progress"]["mode"] = "agentic"
+            store["progress"]["sections_designed"] = len(sections)
+            store["progress"]["tasks_proposed"] = len(tasks)
+            store["progress"]["section_titles"] = [
+                s.get("title", "") for s in sections
+            ]
+            store["progress"]["task_titles"] = [
+                t.get("title", "") for t in tasks
+            ]
+            store["progress"]["routing_reasoning"] = (
+                agentic_report.get("reasoning", "")
+            )
+
+            # Stage 8: Assemble agentic report
+            store["stage"] = "report"
+            store["progress"] = {
+                "step": 8, "total": total_stages,
+                "description": "Assembling report",
+                "mode": "agentic",
+                "sections_designed": len(sections),
+                "tasks_proposed": len(tasks),
+            }
+            logger.info("[%s] Stage 8/8: Assembling agentic report", run_id[:8])
+
+            # Persist proposed tasks to DB
+            raw_tasks = agentic_report.get("tasks", [])
+            db_tasks: list[dict] = []
+            if raw_tasks:
+                from pramana.models.schema import ResearchTask as RTModel
+                with get_session(settings) as session:
+                    for t in raw_tasks:
+                        rt = RTModel(
+                            run_id=run_id,
+                            title=t.get("title", "Untitled"),
+                            description=t.get("description", ""),
+                            code=t.get("code", ""),
+                            language=t.get("language", "python"),
+                            status="proposed",
+                        )
+                        session.add(rt)
+                        session.flush()
+                        db_tasks.append({
+                            "id": rt.id,
+                            "title": rt.title,
+                            "description": rt.description,
+                            "code": rt.code,
+                            "language": rt.language,
+                            "status": rt.status,
+                        })
+
+            # Build final report JSON (agentic format)
+            report_data = {
+                "hypothesis": {
+                    "text": parsed.hypothesis_text,
+                    "domains": parsed.domains,
+                    "topics": parsed.topics,
+                },
+                "title": agentic_report.get("title", ""),
+                "designer_reasoning": agentic_report.get("reasoning", ""),
+                "sections": agentic_report.get("sections", []),
+                "tasks": db_tasks,
+            }
+            report_json = json.dumps(report_data, indent=2)
+        else:
+            # ── LEGACY PATH: fixed flow routing ──
+            store["progress"] = {
+                "step": 6, "total": total_stages,
+                "description": "Routing and running analysis flows",
+            }
+            logger.info("[%s] Stage 6/7: Legacy flow routing", run_id[:8])
+            from pramana.flows.router import select_flows
+            from pramana.pipeline.orchestrator import run_flows
+            selected_flows, routing_reasoning = select_flows(
+                store["hypothesis"], action, parsed, settings
+            )
+            store["progress"]["selected_flows"] = [f.name for f in selected_flows]
+            store["progress"]["routing_reasoning"] = routing_reasoning
+            logger.info("[%s] Flows selected: %s",
+                        run_id[:8], ", ".join(f.name for f in selected_flows))
+            results = run_flows(
+                corpus, normalized, parsed, settings, selected_flows, routing_reasoning
+            )
+            store["progress"]["lenses_completed"] = results.active_lenses
+            logger.info("[%s] Lenses completed: %s",
+                        run_id[:8], ", ".join(results.active_lenses))
+
+            # Stage 7: Synthesize + generate report (legacy)
+            store["stage"] = "report"
+            store["progress"] = {
+                "step": 7, "total": total_stages,
+                "description": "Synthesizing findings",
+            }
+            logger.info("[%s] Stage 7/7: Synthesizing and generating report", run_id[:8])
+            from pramana.pipeline.orchestrator import synthesize_summary
+            from pramana.report.generator import generate_report
+            results.executive_summary = synthesize_summary(results, parsed, settings)
+            store["progress"]["description"] = "Generating report"
+            report_json = generate_report(results, parsed, "json", settings)
 
         store["status"] = "completed"
         store["stage"] = "done"

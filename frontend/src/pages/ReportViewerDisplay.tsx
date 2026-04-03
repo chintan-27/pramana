@@ -1,9 +1,14 @@
-import { type ReactNode, useState, useEffect, useCallback } from 'react';
+import { type ReactNode, useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import type { Report, FlowResult, ExecutiveSummary, Annotation } from '../api/client';
+import type {
+  Report, FlowResult, ExecutiveSummary, Annotation,
+  ReportSection, ResearchTask,
+} from '../api/client';
 import {
   createAnnotation, deleteAnnotation, getAnnotations,
   rerunLens, searchMore, exportReport,
+  approveTask, runTask, updateTaskCode, deleteTask, getTaskOutput,
+  submitSectionFeedback,
 } from '../api/client';
 import { useTheme } from '../theme';
 import ReportChat from './ReportChat';
@@ -119,6 +124,22 @@ export default function ReportViewerDisplay({ report, error, runId }: Props) {
     );
   }
 
+  // Agentic report path: if report has dynamic sections, use the new renderer
+  if (report.sections && report.sections.length > 0) {
+    return (
+      <AgenticReport
+        report={report}
+        runId={runId}
+        bookmarks={bookmarks}
+        annotations={annotations}
+        toggleBookmark={toggleBookmark}
+        annOpen={annOpen}
+        setAnnOpen={setAnnOpen}
+      />
+    );
+  }
+
+  // Legacy report path
   const s = getStats(report);
   const hyp = report.hypothesis as Record<string, string[] | string>;
 
@@ -126,7 +147,7 @@ export default function ReportViewerDisplay({ report, error, runId }: Props) {
     ((hyp.topics as string[])?.slice(0, 3).join(', ') || 'Research Report');
 
   return (
-    <div className="max-w-6xl mx-auto pt-8 pb-16 animate-fade-up overflow-x-hidden lg:grid lg:grid-cols-[1fr_340px] lg:gap-8">
+    <div className="max-w-4xl mx-auto px-5 sm:px-8 pt-8 pb-16 animate-fade-up overflow-x-hidden">
     {/* Report column */}
     <div className="min-w-0">
 
@@ -332,7 +353,7 @@ export default function ReportViewerDisplay({ report, error, runId }: Props) {
           )}
           <div className="space-y-2.5 stagger">
             {s.gaps.map((gap, i) => (
-              <GapCard
+              <LegacyGapCard
                 key={i}
                 gap={gap}
                 idx={i}
@@ -552,6 +573,997 @@ export default function ReportViewerDisplay({ report, error, runId }: Props) {
         <ReportChat runId={runId} />
       </div>
     )}
+    </div>
+  );
+}
+
+/* ════ Export Menu ════ */
+
+function ExportMenu({ runId }: { runId: string | number }) {
+  const [open, setOpen] = useState(false);
+  const formats: Array<{ key: 'bibtex' | 'csv' | 'markdown' | 'docx'; label: string }> = [
+    { key: 'markdown', label: 'Markdown' },
+    { key: 'docx', label: 'Word (.docx)' },
+    { key: 'bibtex', label: 'BibTeX' },
+    { key: 'csv', label: 'CSV' },
+  ];
+  return (
+    <div className="relative shrink-0">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-mono rounded-lg border border-line bg-bg-card text-cream-faint hover:text-cream hover:border-amber/30 transition-colors"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        </svg>
+        Export
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-20 min-w-[140px] rounded-lg border border-line bg-bg-card shadow-lg overflow-hidden">
+          {formats.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => { exportReport(Number(runId), f.key); setOpen(false); }}
+              className="w-full px-3 py-2 text-left text-[11px] font-mono text-cream-dim hover:bg-amber/8 hover:text-cream transition-colors"
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ════ Agentic Report ════ */
+
+interface AgenticReportProps {
+  report: Report;
+  runId?: string | number;
+  bookmarks: Set<string>;
+  annotations: Annotation[];
+  toggleBookmark: (ref: string) => void;
+  annOpen: boolean;
+  setAnnOpen: (v: boolean | ((p: boolean) => boolean)) => void;
+}
+
+function AgenticReport({
+  report, runId, bookmarks, annotations, toggleBookmark,
+  annOpen, setAnnOpen,
+}: AgenticReportProps) {
+  const sections = report.sections!;
+  const tasks = report.tasks || [];
+  const title = report.title || 'Research Analysis';
+  const sectionRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  const scrollTo = (i: number) =>
+    sectionRefs.current[i]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  return (
+    <div className="animate-fade-up">
+      {/* ── Header band ── */}
+      <div className="border-b border-line/30 bg-bg-card/20 backdrop-blur-sm">
+        <div className="max-w-7xl mx-auto px-5 sm:px-8 py-5 flex items-start justify-between gap-6">
+          <div className="min-w-0">
+            <p className="text-[10px] font-mono text-amber tracking-[0.2em] uppercase mb-1.5">Research Report</p>
+            <h1 className="font-display text-2xl sm:text-[30px] font-300 text-cream leading-[1.15] tracking-tight break-words">
+              {title.length > 110 ? title.slice(0, 110) + '\u2026' : title}
+            </h1>
+            <div className="flex gap-3 mt-2 text-[10px] font-mono text-cream-faint/60">
+              <span>{sections.length} sections</span>
+              {tasks.length > 0 && <span className="text-amber/70">{tasks.length} tasks</span>}
+              {annotations.length > 0 && <span>{annotations.length} bookmarks</span>}
+            </div>
+          </div>
+          <div className="shrink-0">{runId && <ExportMenu runId={runId} />}</div>
+        </div>
+        {report.executive_summary?.headline && (
+          <div className="max-w-7xl mx-auto px-5 sm:px-8 pb-5">
+            <ExecSummary es={report.executive_summary} />
+          </div>
+        )}
+      </div>
+
+      {/* ── 3-column body ── */}
+      <div className="max-w-7xl mx-auto flex">
+
+        {/* Left TOC */}
+        <div className="hidden xl:block w-48 shrink-0">
+          <div className="sticky top-11 h-[calc(100vh-2.75rem)] overflow-y-auto pt-5 pb-10 px-3">
+            <p className="text-[8px] font-mono text-cream-faint/30 tracking-widest uppercase mb-2 px-2">Contents</p>
+            <nav className="space-y-px">
+              {sections.map((sec, i) => (
+                <button
+                  key={sec.id}
+                  onClick={() => scrollTo(i)}
+                  className="w-full flex items-start gap-2 px-2 py-1.5 rounded-md hover:bg-bg-hover transition-colors text-left group"
+                >
+                  <span className="text-[8px] font-mono text-cream-faint/25 mt-0.5 shrink-0 tabular-nums group-hover:text-amber/40 transition-colors">
+                    {String(i + 1).padStart(2, '0')}
+                  </span>
+                  <span className="text-[11px] text-cream-faint/60 group-hover:text-cream-dim transition-colors leading-snug line-clamp-2">
+                    {sec.title}
+                  </span>
+                </button>
+              ))}
+              {tasks.length > 0 && (
+                <div className="pt-2 mt-1 border-t border-line/20 px-2">
+                  <span className="text-[8px] font-mono text-amber/40 tracking-wider uppercase">Tasks</span>
+                </div>
+              )}
+            </nav>
+          </div>
+        </div>
+
+        {/* Center content */}
+        <div className="flex-1 min-w-0 px-4 sm:px-6 pt-5 pb-20 space-y-4">
+          {/* Agent reasoning — compact strip */}
+          {report.designer_reasoning && (
+            <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg border border-amber/12 bg-amber/4 mb-5">
+              <span className="text-amber/50 text-[11px] shrink-0 mt-px">✦</span>
+              <p className="text-[12px] text-cream-dim leading-relaxed italic">{report.designer_reasoning}</p>
+            </div>
+          )}
+
+          {sections.map((sec, i) => (
+            <div key={sec.id} ref={el => { sectionRefs.current[i] = el; }}>
+              <SectionCard
+                section={sec} idx={i}
+                bookmarked={bookmarks.has(`sec:${sec.id}`)}
+                onBookmark={() => toggleBookmark(`sec:${sec.id}`)}
+                runId={runId}
+              />
+            </div>
+          ))}
+
+          {tasks.length > 0 && (
+            <div className="pt-4">
+              <p className="text-[10px] font-mono text-amber tracking-[0.2em] uppercase mb-3">Code Tasks</p>
+              <div className="space-y-3">
+                {tasks.map(task => <TaskCard key={task.id} task={task} runId={runId} />)}
+              </div>
+            </div>
+          )}
+
+          <div className="pt-6 mt-4 border-t border-line/30 flex items-center justify-between">
+            <Link to="/evidence" className="text-[12px] font-medium text-amber hover:text-amber-glow transition-colors">Explore Evidence →</Link>
+            <Link to="/" className="text-[12px] text-cream-faint/60 hover:text-cream transition-colors">New Analysis</Link>
+          </div>
+        </div>
+
+        {/* Right compact sidebar */}
+        <div className="hidden lg:block w-56 shrink-0">
+          <div className="sticky top-11 h-[calc(100vh-2.75rem)] overflow-y-auto pt-5 pb-10 px-3 space-y-4">
+            {runId && <ReportChat runId={runId} />}
+            {annotations.length > 0 && (
+              <div className="rounded-xl border border-line bg-bg-card overflow-hidden">
+                <button
+                  onClick={() => setAnnOpen((v: boolean) => !v)}
+                  className="w-full px-3 py-2.5 flex items-center justify-between text-[10px] font-mono text-amber tracking-widest uppercase hover:opacity-80 transition-opacity"
+                >
+                  Bookmarks ({annotations.length})
+                  <svg className={`w-3 h-3 transition-transform ${annOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/>
+                  </svg>
+                </button>
+                {annOpen && (
+                  <div className="border-t border-line divide-y divide-line/30 max-h-52 overflow-y-auto">
+                    {annotations.map(ann => (
+                      <div key={ann.id} className="px-3 py-2 flex items-center justify-between gap-2">
+                        <p className="text-[10px] text-cream-dim font-mono truncate">{ann.content_ref}</p>
+                        <button onClick={() => toggleBookmark(ann.content_ref)} className="shrink-0 text-cream-faint/40 hover:text-rose transition-colors">×</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile chat */}
+      {runId && <div className="lg:hidden px-4 pb-8"><ReportChat runId={runId} /></div>}
+    </div>
+  );
+}
+
+/* ════ Section Card (dynamic) ════ */
+
+const SECTION_COLORS: Record<string, { accent: string; border: string; bg: string }> = {
+  narrative: { accent: 'text-violet-300', border: 'border-violet-500/25', bg: 'bg-violet-500/8' },
+  evidence: { accent: 'text-amber', border: 'border-amber/25', bg: 'bg-amber/8' },
+  gaps: { accent: 'text-rose', border: 'border-rose/25', bg: 'bg-rose/8' },
+  contradictions: { accent: 'text-rose', border: 'border-rose/25', bg: 'bg-rose/8' },
+  statistics: { accent: 'text-teal', border: 'border-teal/25', bg: 'bg-teal/8' },
+  proposal: { accent: 'text-violet-300', border: 'border-violet-500/25', bg: 'bg-violet-500/8' },
+  review: { accent: 'text-violet-300', border: 'border-violet-500/25', bg: 'bg-violet-500/8' },
+  tasks: { accent: 'text-teal', border: 'border-teal/25', bg: 'bg-teal/8' },
+  table: { accent: 'text-amber', border: 'border-amber/25', bg: 'bg-amber/8' },
+};
+const SECTION_DEFAULT = { accent: 'text-amber', border: 'border-amber/25', bg: 'bg-amber/8' };
+
+function SectionCard({
+  section, idx, bookmarked, onBookmark, runId,
+}: {
+  section: ReportSection; idx: number; bookmarked: boolean; onBookmark: () => void;
+  runId?: string | number;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const [rating, setRating] = useState(0);
+  const [hoverStar, setHoverStar] = useState(0);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [note, setNote] = useState('');
+  const [feedbackSaved, setFeedbackSaved] = useState(false);
+  const [refining, setRefining] = useState(false);
+  const colors = SECTION_COLORS[section.type] || SECTION_DEFAULT;
+
+  const handleRate = async (star: number) => {
+    setRating(star);
+    setFeedbackSaved(false);
+    if (!runId) return;
+    try {
+      await submitSectionFeedback(String(runId), section.id, star, note);
+      setFeedbackSaved(true);
+      setTimeout(() => setFeedbackSaved(false), 2000);
+    } catch { /* ignore */ }
+  };
+
+  const handleNote = async () => {
+    if (!runId || !rating) return;
+    try {
+      await submitSectionFeedback(String(runId), section.id, rating, note);
+      setFeedbackSaved(true);
+      setNoteOpen(false);
+      setTimeout(() => setFeedbackSaved(false), 2000);
+    } catch { /* ignore */ }
+  };
+
+  const handleRefine = async () => {
+    if (!runId) return;
+    setRefining(true);
+    try {
+      await rerunLens(String(runId), section.id);
+      window.location.reload();
+    } catch {
+      setRefining(false);
+    }
+  };
+
+  return (
+    <div className={`relative rounded-xl border ${colors.border} ${colors.bg} overflow-hidden`}>
+      {/* Watermark */}
+      <span className="absolute top-2 right-3 text-[40px] font-display font-700 leading-none opacity-[0.04] select-none pointer-events-none">
+        {String(idx + 1).padStart(2, '0')}
+      </span>
+
+      {/* Header */}
+      <div className="px-3 pt-3 pb-2.5 flex items-start gap-2.5 relative">
+        <span className={`shrink-0 w-7 h-7 rounded-md ${colors.bg} border ${colors.border} flex items-center justify-center text-[11px] font-mono font-bold ${colors.accent}`}>
+          {idx + 1}
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className={`text-[13px] font-semibold ${colors.accent} leading-snug`}>
+            {section.title}
+          </p>
+          <p className="text-[9px] font-mono text-cream-faint mt-0.5">
+            {section.render_hint.replace(/_/g, ' ')}
+          </p>
+        </div>
+        <div className="shrink-0 flex items-center gap-1">
+          <button onClick={onBookmark} title="Bookmark" className="text-[15px] text-cream-faint hover:text-amber transition-colors">
+            {bookmarked ? '\u2605' : '\u2606'}
+          </button>
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="text-[11px] font-mono px-2 py-0.5 rounded border border-line bg-bg-card text-cream-faint hover:text-cream transition-colors"
+          >
+            {expanded ? '\u25B4' : '\u25BE'}
+          </button>
+        </div>
+      </div>
+
+      {/* Content */}
+      {expanded && (
+        <div className="px-3 pb-3 border-t border-line/40 pt-2.5">
+          {refining ? (
+            <div className="flex items-center gap-2 py-8 justify-center">
+              <div className="w-4 h-4 border-2 border-amber border-t-transparent rounded-full animate-spin" />
+              <span className="text-[12px] text-cream-faint font-mono">Refining section...</span>
+            </div>
+          ) : (
+            <SectionContent section={section} />
+          )}
+        </div>
+      )}
+
+      {/* Feedback bar */}
+      {expanded && runId && (
+        <div className="px-3 py-2 border-t border-line/30 flex items-center gap-2.5 flex-wrap">
+          {/* Star rating */}
+          <div className="flex items-center gap-0.5">
+            {[1, 2, 3, 4, 5].map((star) => (
+              <button
+                key={star}
+                onMouseEnter={() => setHoverStar(star)}
+                onMouseLeave={() => setHoverStar(0)}
+                onClick={() => handleRate(star)}
+                className={`text-[16px] transition-colors ${
+                  star <= (hoverStar || rating) ? 'text-amber' : 'text-cream-faint/30'
+                } hover:scale-110`}
+              >
+                {star <= (hoverStar || rating) ? '\u2605' : '\u2606'}
+              </button>
+            ))}
+          </div>
+
+          {/* Saved indicator */}
+          {feedbackSaved && (
+            <span className="text-[10px] font-mono text-teal">Saved</span>
+          )}
+
+          {/* Add note toggle */}
+          <button
+            onClick={() => setNoteOpen((v) => !v)}
+            className="text-[10px] font-mono text-cream-faint hover:text-cream transition-colors"
+          >
+            {noteOpen ? 'Close note' : '+ Note'}
+          </button>
+
+          {/* Refine button */}
+          <button
+            onClick={handleRefine}
+            disabled={refining}
+            className="ml-auto text-[10px] font-mono px-2 py-1 rounded border border-amber/25 text-amber hover:bg-amber/10 transition-colors disabled:opacity-40"
+          >
+            Refine section
+          </button>
+
+          {/* Note input row */}
+          {noteOpen && (
+            <div className="w-full flex gap-2 mt-1">
+              <input
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="What should improve?"
+                className="flex-1 text-[11px] px-2 py-1.5 rounded border border-line bg-bg-card text-cream placeholder:text-cream-faint/40 outline-none focus:border-amber/40"
+              />
+              <button
+                onClick={handleNote}
+                disabled={!rating}
+                className="text-[10px] font-mono px-2 py-1 rounded bg-amber/15 text-amber border border-amber/25 hover:bg-amber/25 transition-colors disabled:opacity-40"
+              >
+                Save
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ════ Sortable Table ════ */
+
+function SortableTable({ content }: { content: Record<string, unknown> }) {
+  const [sortCol, setSortCol] = useState<string | null>(null);
+  const [sortAsc, setSortAsc] = useState(true);
+
+  // Parse rows from various shapes
+  let rows = (content.rows || content.data) as Array<Record<string, unknown>> | undefined;
+  if (!rows && content.tables) {
+    const t = content.tables as unknown;
+    if (Array.isArray(t)) {
+      rows = t as Array<Record<string, unknown>>;
+    } else if (typeof t === 'object' && t !== null) {
+      rows = Object.entries(t as Record<string, Array<Record<string, unknown>>>).flatMap(([type, items]) =>
+        (items || []).map((item) => ({ type, ...item }))
+      );
+    }
+  }
+
+  if (!rows || rows.length === 0) {
+    return <p className="text-sm text-cream-muted">{content.summary as string || 'No data.'}</p>;
+  }
+
+  const preferred = ['type', 'content', 'paper_title', 'paper', 'finding', 'method', 'year', 'location'];
+  const allKeys = Object.keys(rows[0]);
+  const cols = preferred.filter((k) => allKeys.includes(k));
+  const displayCols = cols.length > 0 ? cols : allKeys.slice(0, 6);
+
+  const sorted = [...rows].sort((a, b) => {
+    if (!sortCol) return 0;
+    const va = String(a[sortCol] ?? '');
+    const vb = String(b[sortCol] ?? '');
+    return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+  });
+
+  const handleSort = (col: string) => {
+    if (sortCol === col) setSortAsc((v) => !v);
+    else { setSortCol(col); setSortAsc(true); }
+  };
+
+  return (
+    <div className="space-y-2">
+      {content.caption && (
+        <p className="text-[11px] text-cream-faint italic">{content.caption as string}</p>
+      )}
+      <div className="overflow-x-auto rounded-lg border border-line/40">
+        <table className="w-full text-[12px]">
+          <thead>
+            <tr className="bg-bg-inset border-b border-line">
+              {displayCols.map((h) => (
+                <th
+                  key={h}
+                  onClick={() => handleSort(h)}
+                  className="py-2 px-3 text-left font-mono text-[10px] text-cream-faint tracking-wider cursor-pointer hover:text-cream select-none"
+                >
+                  {h.replace(/_/g, ' ')}
+                  {sortCol === h && (
+                    <span className="ml-1 text-amber">{sortAsc ? '\u25B4' : '\u25BE'}</span>
+                  )}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.slice(0, 25).map((row, i) => (
+              <tr key={i} className={`border-b border-line/20 ${i % 2 === 1 ? 'bg-bg-inset/50' : ''}`}>
+                {displayCols.map((col) => (
+                  <td key={col} className="py-1.5 px-3 text-cream-dim max-w-xs truncate">
+                    {String(row[col] ?? '')}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[10px] text-cream-faint/50 font-mono">
+        {rows.length} rows{rows.length > 25 ? ' (showing first 25)' : ''}
+      </p>
+    </div>
+  );
+}
+
+/* ════ Gap Card (expandable) ════ */
+
+function GapCard({ gap }: { gap: Record<string, unknown> }) {
+  const [expanded, setExpanded] = useState(false);
+  const severity = (gap.severity as string) || 'low';
+  const design = gap.suggested_design as Record<string, unknown> | undefined;
+
+  return (
+    <div className={`rounded-lg border-l-[3px] overflow-hidden ${
+      severity === 'high' ? 'border-l-rose bg-rose/5 border border-rose/10' :
+      severity === 'medium' ? 'border-l-amber bg-amber/5 border border-amber/10' :
+      'border-l-cream-faint bg-bg-card border border-line'
+    }`}>
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded capitalize ${
+                severity === 'high' ? 'bg-rose/15 text-rose border border-rose/20' :
+                severity === 'medium' ? 'bg-amber/15 text-amber border border-amber/20' :
+                'bg-cream-faint/10 text-cream-faint border border-line'
+              }`}>
+                {severity}
+              </span>
+            </div>
+            <p className="text-[14px] font-medium text-cream">{gap.description as string}</p>
+            {gap.evidence && <p className="text-sm text-cream-muted mt-1">{gap.evidence as string}</p>}
+          </div>
+          {design && (
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              className="shrink-0 text-[10px] font-mono px-2 py-1 rounded border border-line bg-bg-card text-cream-faint hover:text-cream transition-colors"
+            >
+              {expanded ? 'Hide' : 'Study design'}
+            </button>
+          )}
+        </div>
+      </div>
+      {expanded && design && (
+        <div className="px-4 pb-4 pt-0">
+          <div className="p-3 rounded-lg bg-bg-inset border border-line/50 space-y-1.5">
+            <div className="flex gap-4 flex-wrap text-[11px]">
+              {design.design_type && (
+                <span className="text-cream-faint">
+                  <span className="text-cream-faint/50">Type:</span> {design.design_type as string}
+                </span>
+              )}
+              {design.feasibility && (
+                <span className="text-cream-faint">
+                  <span className="text-cream-faint/50">Feasibility:</span> {design.feasibility as string}
+                </span>
+              )}
+            </div>
+            {design.key_variables && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {(design.key_variables as string[]).map((v, j) => (
+                  <span key={j} className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-violet-500/10 text-violet-400 border border-violet-500/20">
+                    {v}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ════ Section content renderer ════ */
+
+function SectionContent({ section }: { section: ReportSection }) {
+  const c = section.content;
+  const hint = section.render_hint;
+
+  // Error state: lens failed
+  if (c.error) {
+    return (
+      <div className="p-3 bg-rose/8 border border-rose/20 rounded-lg">
+        <p className="text-[11px] font-mono text-rose mb-1">Analysis unavailable</p>
+        <p className="text-[12px] text-cream-muted">{String(c.error)}</p>
+      </div>
+    );
+  }
+
+  // prose_card: narrative text with TL;DR chip
+  if (hint === 'prose_card') {
+    const text = (c.text as string) || (c.draft as string) || '';
+    const tldr = (c.summary as string) || '';
+    return (
+      <div className="relative space-y-2">
+        {tldr && (
+          <div className="px-3 py-1.5 rounded-lg bg-amber/8 border border-amber/15 inline-block">
+            <span className="text-[9px] font-mono text-amber tracking-wider uppercase mr-2">TL;DR</span>
+            <span className="text-[12px] text-cream-dim">{tldr}</span>
+          </div>
+        )}
+        <div className="prose-block max-h-96 overflow-y-auto text-[13px] text-cream leading-relaxed whitespace-pre-wrap">
+          {text || tldr || JSON.stringify(c, null, 2)}
+        </div>
+        {text && <CopyButton text={text} />}
+      </div>
+    );
+  }
+
+  // fact_cards: evidence cards with supporting/refuting split
+  if (hint === 'fact_cards') {
+    const sup = (c.supporting_facts || []) as Array<Record<string, string>>;
+    const ref = (c.refuting_facts || []) as Array<Record<string, string>>;
+    let rawFacts = c.facts as unknown;
+    const hasSplit = sup.length > 0 || ref.length > 0;
+    if (!rawFacts && !hasSplit) rawFacts = c.tables;
+    const flatFacts = rawFacts
+      ? (Array.isArray(rawFacts) ? rawFacts : Object.values(rawFacts as Record<string, unknown>).flat()) as Array<Record<string, string>>
+      : [];
+
+    const verdict = c.verdict as string | undefined;
+    const confidence = c.confidence as number | undefined;
+
+    const FactCard = ({ f, accent }: { f: Record<string, string>; accent?: string }) => (
+      <div className={`p-3 rounded-lg border ${
+        accent === 'support' ? 'bg-emerald-500/5 border-emerald-500/15' :
+        accent === 'refute' ? 'bg-rose/5 border-rose/15' :
+        'bg-bg-inset border-line'
+      }`}>
+        <p className="text-[13px] text-cream leading-relaxed">{f.content || f.text || JSON.stringify(f)}</p>
+        {(f.direct_quote || f.quote) && (
+          <div className="quote-bar mt-2">
+            <p className="text-sm italic text-cream-muted">&ldquo;{f.direct_quote || f.quote}&rdquo;</p>
+          </div>
+        )}
+        {(f.paper_title || f.paper) && (
+          <div className="flex items-center gap-1.5 mt-2">
+            <svg className="w-3 h-3 text-cream-faint/50 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+            </svg>
+            <p className="text-[11px] text-cream-faint font-mono truncate">{f.paper_title || f.paper}</p>
+            {f.location && <span className="text-[10px] text-cream-faint/50 font-mono shrink-0">{f.location}</span>}
+          </div>
+        )}
+      </div>
+    );
+
+    return (
+      <div className="space-y-3">
+        {/* Verdict badge + confidence meter */}
+        {verdict && (
+          <div className="flex items-center gap-3 mb-1">
+            <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-semibold ${
+              verdict === 'supported' ? 'bg-emerald-500/15 text-emerald-400' :
+              verdict === 'refuted' ? 'bg-rose/15 text-rose' : 'bg-amber/15 text-amber'
+            }`}>
+              {verdict === 'supported' ? '\u2713 Supported' : verdict === 'refuted' ? '\u2717 Refuted' : '~ Mixed'}
+            </div>
+            {confidence !== undefined && (
+              <div className="flex items-center gap-2">
+                <div className="w-20 h-1.5 bg-line/50 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${confidence >= 0.7 ? 'bg-teal' : confidence >= 0.4 ? 'bg-amber' : 'bg-rose'}`}
+                    style={{ width: `${Math.round(confidence * 100)}%` }}
+                  />
+                </div>
+                <span className="text-[10px] font-mono text-cream-faint">{Math.round(confidence * 100)}%</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Two-column split if supporting + refuting exist */}
+        {hasSplit ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {sup.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-[10px] font-mono text-emerald-400 tracking-wider uppercase">Supporting ({sup.length})</p>
+                {sup.slice(0, 6).map((f, i) => <FactCard key={`s${i}`} f={f} accent="support" />)}
+              </div>
+            )}
+            {ref.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-[10px] font-mono text-rose tracking-wider uppercase">Refuting ({ref.length})</p>
+                {ref.slice(0, 6).map((f, i) => <FactCard key={`r${i}`} f={f} accent="refute" />)}
+              </div>
+            )}
+          </div>
+        ) : (
+          flatFacts.slice(0, 10).map((f, i) => <FactCard key={i} f={f} />)
+        )}
+
+        {/* Paper count footer */}
+        {(hasSplit || flatFacts.length > 0) && (
+          <p className="text-[10px] text-cream-faint/60 font-mono pt-1">
+            Based on {hasSplit ? sup.length + ref.length : flatFacts.length} pieces of evidence
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // gap_list with severity indicators and expandable study designs
+  if (hint === 'gap_list') {
+    const gaps = (c.gaps || []) as Array<Record<string, unknown>>;
+    return (
+      <div className="space-y-3">
+        {typeof c.summary === 'string' && c.summary && (
+          <p className="text-[12px] text-cream-muted leading-relaxed mb-2">{c.summary as string}</p>
+        )}
+        {gaps.map((g, i) => (
+          <GapCard key={i} gap={g} />
+        ))}
+        {gaps.length === 0 && <p className="text-sm text-cream-muted">{(c.summary as string) || 'No gaps found.'}</p>}
+      </div>
+    );
+  }
+
+  // comparison_grid: full contradiction cards with description
+  if (hint === 'comparison_grid') {
+    const contras = (c.contradictions || []) as Array<Record<string, string>>;
+    return (
+      <div className="space-y-4">
+        {typeof c.summary === 'string' && c.summary && (
+          <p className="text-[12px] text-cream-muted leading-relaxed">{c.summary}</p>
+        )}
+        {contras.slice(0, 8).map((ct, i) => (
+          <div key={i} className="rounded-xl border border-rose/20 overflow-hidden">
+            <div className="px-4 py-2 bg-rose/8 border-b border-rose/15 flex items-center gap-2">
+              <svg className="w-3.5 h-3.5 text-rose shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              <span className="text-[12px] font-semibold text-rose">{ct.topic}</span>
+              {ct.type && (
+                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-rose/10 text-rose/70 border border-rose/15 ml-auto capitalize">
+                  {ct.type}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 divide-x divide-line/40">
+              <div className="p-3">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <svg className="w-3 h-3 text-cream-faint/50 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                  </svg>
+                  <p className="text-[11px] font-mono text-cream-faint truncate">{ct.paper_a}</p>
+                </div>
+                <p className="text-[12px] text-cream leading-relaxed">{ct.claim_a}</p>
+              </div>
+              <div className="p-3">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <svg className="w-3 h-3 text-cream-faint/50 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                  </svg>
+                  <p className="text-[11px] font-mono text-cream-faint truncate">{ct.paper_b}</p>
+                </div>
+                <p className="text-[12px] text-cream leading-relaxed">{ct.claim_b}</p>
+              </div>
+            </div>
+            {ct.description && (
+              <div className="px-4 py-2.5 bg-bg-inset border-t border-line/30">
+                <p className="text-[11px] text-cream-dim leading-relaxed">{ct.description}</p>
+              </div>
+            )}
+          </div>
+        ))}
+        {contras.length === 0 && <p className="text-sm text-cream-muted">No contradictions found.</p>}
+      </div>
+    );
+  }
+
+  // bar_chart: actual recharts BarChart + table fallback
+  if (hint === 'bar_chart') {
+    const aggs = (c.aggregations || []) as Array<Record<string, unknown>>;
+    if (aggs.length > 0) {
+      const chartData = aggs.map((a) => ({
+        name: (a.metric as string) || '',
+        mean: a.mean as number ?? 0,
+        count: a.count as number ?? 0,
+      }));
+      return (
+        <div className="space-y-4">
+          {/* Chart */}
+          <div className="h-48 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(240,230,211,0.06)" />
+                <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#8a7e6e' }} />
+                <YAxis tick={{ fontSize: 10, fill: '#8a7e6e' }} />
+                <Tooltip
+                  contentStyle={{ background: '#252220', border: '1px solid rgba(240,230,211,0.1)', borderRadius: 8, fontSize: 11 }}
+                  labelStyle={{ color: '#f0e6d3' }}
+                  itemStyle={{ color: '#e8a84c' }}
+                />
+                <Bar dataKey="mean" fill="#e8a84c" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          {/* Detailed table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="border-b border-line text-left">
+                  {['Metric', 'n', 'Mean', 'Min', 'Max'].map((h) => (
+                    <th key={h} className="pb-2 pr-4 font-mono text-[10px] text-cream-faint tracking-wider">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line/40">
+                {aggs.map((a, i) => (
+                  <tr key={i}>
+                    <td className="py-1.5 pr-4 text-cream font-medium">{a.metric as string}</td>
+                    <td className="py-1.5 pr-4 text-cream-muted font-mono">{a.count as number}</td>
+                    <td className="py-1.5 pr-4 text-amber font-mono">{(a.mean as number)?.toFixed(2)}</td>
+                    <td className="py-1.5 pr-4 text-cream-muted font-mono">{(a.min as number)?.toFixed(2)}</td>
+                    <td className="py-1.5 font-mono text-cream-muted">{(a.max as number)?.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+    // Fallback: prose
+    const text = (c.summary as string) || (c.text as string) || '';
+    return <p className="text-[13px] text-cream-muted leading-relaxed">{text || JSON.stringify(c, null, 2)}</p>;
+  }
+
+  // table: sortable with zebra rows and caption
+  if (hint === 'table') {
+    return <SortableTable content={c} />;
+  }
+
+  // task_card: render as prose (tasks are rendered separately)
+  // Default: dump content as prose
+  const text = (c.text as string) || (c.summary as string) || (c.draft as string) || '';
+  if (text) {
+    return (
+      <div className="prose-block text-[13px] text-cream leading-relaxed whitespace-pre-wrap">
+        {text}
+      </div>
+    );
+  }
+
+  // Last resort: JSON
+  return (
+    <pre className="text-[11px] text-cream-faint font-mono overflow-x-auto whitespace-pre-wrap">
+      {JSON.stringify(c, null, 2)}
+    </pre>
+  );
+}
+
+/* ════ Task Card ════ */
+
+function TaskCard({ task: initialTask, runId }: { task: ResearchTask; runId?: string | number }) {
+  const [task, setTask] = useState({
+    ...initialTask,
+    id: initialTask.id ?? 0,
+    status: initialTask.status ?? 'proposed',
+  });
+  const [showCode, setShowCode] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [code, setCode] = useState(task.code);
+  const [busy, setBusy] = useState(false);
+  const [showOutput, setShowOutput] = useState(false);
+
+  const statusColors: Record<string, string> = {
+    proposed: 'text-amber bg-amber/10 border-amber/25',
+    approved: 'text-teal bg-teal/10 border-teal/25',
+    running: 'text-violet-300 bg-violet-500/10 border-violet-500/25',
+    completed: 'text-teal bg-teal/10 border-teal/25',
+    failed: 'text-rose bg-rose/10 border-rose/25',
+  };
+
+  const handleApproveAndRun = async () => {
+    if (!runId) return;
+    setBusy(true);
+    try {
+      if (task.status === 'proposed') {
+        await approveTask(runId, task.id);
+        setTask((t) => ({ ...t, status: 'approved' }));
+      }
+      await runTask(runId, task.id);
+      setTask((t) => ({ ...t, status: 'running' }));
+      // Poll for completion
+      const poll = setInterval(async () => {
+        try {
+          const { task: updated } = await getTaskOutput(runId, task.id);
+          if (updated.status === 'completed' || updated.status === 'failed') {
+            setTask(updated);
+            setShowOutput(true);
+            clearInterval(poll);
+            setBusy(false);
+          }
+        } catch {
+          clearInterval(poll);
+          setBusy(false);
+        }
+      }, 2000);
+    } catch {
+      setBusy(false);
+    }
+  };
+
+  const handleSaveCode = async () => {
+    if (!runId) return;
+    setBusy(true);
+    try {
+      await updateTaskCode(runId, task.id, code);
+      setTask((t) => ({ ...t, code }));
+      setEditing(false);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!runId) return;
+    setBusy(true);
+    try {
+      await deleteTask(runId, task.id);
+      setTask((t) => ({ ...t, status: 'failed' }));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-teal/20 bg-teal/5 overflow-hidden">
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <p className="text-[14px] font-semibold text-cream">{task.title}</p>
+              <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border capitalize ${statusColors[task.status] || statusColors.proposed}`}>
+                {task.status}
+              </span>
+            </div>
+            <p className="text-[12px] text-cream-muted leading-relaxed">{task.description}</p>
+          </div>
+          <div className="shrink-0 flex items-center gap-1">
+            <button
+              onClick={() => setShowCode((v) => !v)}
+              className="text-[10px] font-mono px-2 py-1 rounded border border-line bg-bg-card text-cream-faint hover:text-cream transition-colors"
+            >
+              {showCode ? 'Hide' : 'Code'}
+            </button>
+            {task.id > 0 && (task.status === 'proposed' || task.status === 'approved') && runId && (
+              <button
+                onClick={handleApproveAndRun}
+                disabled={busy}
+                className="text-[10px] font-mono px-2 py-1 rounded border border-teal/30 bg-teal/15 text-teal hover:bg-teal/25 transition-colors disabled:opacity-40"
+              >
+                {busy ? '\u2026' : 'Run'}
+              </button>
+            )}
+            {task.id > 0 && task.status === 'proposed' && runId && (
+              <button
+                onClick={handleDelete}
+                disabled={busy}
+                className="text-[10px] font-mono px-2 py-1 rounded border border-rose/30 bg-rose/10 text-rose hover:bg-rose/20 transition-colors disabled:opacity-40"
+                title="Delete"
+              >
+                x
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Code view */}
+      {showCode && (
+        <div className="border-t border-line/40">
+          {editing ? (
+            <div className="p-3">
+              <textarea
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                className="w-full h-64 p-3 bg-bg-inset border border-line rounded-lg text-[12px] font-mono text-cream leading-relaxed resize-y focus:outline-none focus:border-amber/50"
+              />
+              <div className="flex gap-2 mt-2">
+                <button
+                  onClick={handleSaveCode}
+                  disabled={busy}
+                  className="text-[10px] font-mono px-3 py-1 rounded bg-amber text-bg hover:bg-amber-glow transition-colors disabled:opacity-40"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={() => { setCode(task.code); setEditing(false); }}
+                  className="text-[10px] font-mono px-3 py-1 rounded border border-line text-cream-faint hover:text-cream transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="relative">
+              <pre className="p-3 text-[11px] font-mono text-cream-dim leading-relaxed overflow-x-auto max-h-80 whitespace-pre-wrap">
+                {task.code}
+              </pre>
+              {runId && (task.status === 'proposed' || task.status === 'approved') && (
+                <button
+                  onClick={() => setEditing(true)}
+                  className="absolute top-2 right-2 text-[10px] font-mono px-2 py-1 rounded bg-bg-card border border-line text-cream-faint hover:text-cream transition-colors"
+                >
+                  Edit
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Output */}
+      {showOutput && task.output && (
+        <div className="border-t border-line/40">
+          <button
+            onClick={() => setShowOutput((v) => !v)}
+            className="w-full px-4 py-2 flex items-center justify-between text-[10px] font-mono text-cream-faint hover:text-cream transition-colors"
+          >
+            <span>Output</span>
+            <svg className={`w-3 h-3 transition-transform ${showOutput ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          <pre className="px-4 pb-4 text-[11px] font-mono text-cream-faint leading-relaxed overflow-x-auto max-h-60 whitespace-pre-wrap">
+            {task.output}
+          </pre>
+        </div>
+      )}
+
+      {/* Busy indicator */}
+      {busy && task.status === 'running' && (
+        <div className="px-4 py-2 border-t border-line/40">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 border-2 border-teal/30 border-t-teal rounded-full animate-spin" />
+            <span className="text-[11px] font-mono text-cream-faint">Running...</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -873,9 +1885,9 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-/* ════ Gap card ════ */
+/* ════ Legacy Gap card (flow renderer) ════ */
 
-function GapCard({ gap, idx, bookmarked, onBookmark }: { gap: Gap; idx: number; bookmarked: boolean; onBookmark: () => void }) {
+function LegacyGapCard({ gap, idx, bookmarked, onBookmark }: { gap: Gap; idx: number; bookmarked: boolean; onBookmark: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const sd = gap.suggested_design;
   const feasColor = sd?.feasibility === 'high' ? 'text-teal bg-teal/10 border-teal/25' :

@@ -130,6 +130,22 @@ class Annotation(Base):
     created_at = Column(DateTime, default=func.now())
 
 
+class ResearchTask(Base):
+    __tablename__ = "research_tasks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(100), nullable=False)
+    title = Column(String(500), nullable=False)
+    description = Column(Text, default="")
+    code = Column(Text, default="")
+    language = Column(String(20), default="python")
+    status = Column(String(20), default="proposed")
+    output = Column(Text, default="")
+    linked_section_id = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    completed_at = Column(DateTime, nullable=True)
+
+
 class ExpertFeedback(Base):
     __tablename__ = "expert_feedback"
 
@@ -140,3 +156,14 @@ class ExpertFeedback(Base):
     created_at = Column(DateTime, default=func.now())
 
     fact = relationship("ExtractedFact")
+
+
+class SectionFeedback(Base):
+    __tablename__ = "section_feedback"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(100), nullable=False)
+    section_id = Column(String(100), nullable=False)  # e.g. "sec_1"
+    rating = Column(Integer, nullable=False)  # 1-5
+    note = Column(Text, default="")
+    created_at = Column(DateTime, default=func.now())
